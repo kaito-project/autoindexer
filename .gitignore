@@ -1,0 +1,40 @@
+/bin
+.coverage
+.coverage.*
+.env
+
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+bin/*
+Dockerfile.cross
+__pycache__/
+.ruff_cache/
+.venv/
+
+# Test binary, build with `go test -c`
+*.test
+
+# Output of the go coverage tool, specifically when used with LiteIDE
+*.out
+
+# Kubernetes Generated files - skip generated files, except for vendored files
+
+!vendor/**/zz_generated.*
+
+# editor and IDE paraphernalia
+.idea
+.vscode
+*.swp
+*.swo
+*~
+vendor/*
+hack/tools/bin/*
+.DS_Store
+/coverage.txt
+
+# values override file for helm chart installation
+values.override.yaml
