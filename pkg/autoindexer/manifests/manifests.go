@@ -51,8 +51,6 @@ const (
 	// Default resource limits and requests
 	DefaultCPURequest    = "100m"
 	DefaultMemoryRequest = "256Mi"
-	DefaultCPULimit      = "1"
-	DefaultMemoryLimit   = "1Gi"
 )
 
 // JobConfig contains the configuration for creating indexing jobs
@@ -265,10 +263,6 @@ func getResourceRequirements(limits *corev1.ResourceRequirements) corev1.Resourc
 		Requests: corev1.ResourceList{
 			corev1.ResourceCPU:    resource.MustParse(DefaultCPURequest),
 			corev1.ResourceMemory: resource.MustParse(DefaultMemoryRequest),
-		},
-		Limits: corev1.ResourceList{
-			corev1.ResourceCPU:    resource.MustParse(DefaultCPULimit),
-			corev1.ResourceMemory: resource.MustParse(DefaultMemoryLimit),
 		},
 	}
 }
