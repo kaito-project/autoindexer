@@ -462,7 +462,7 @@ func (ic ImageConfig) GetImage() string {
 
 func getImageConfig() ImageConfig {
 	return ImageConfig{
-		RegistryName: getEnv("PRESET_AUTO_INDEXER_REGISTRY_NAME", "aimodelsregistrytest.azurecr.io"),
+		RegistryName: getEnv("PRESET_AUTO_INDEXER_REGISTRY_NAME", "mcr.microsoft.com/aks/kaito"),
 		ImageName:    getEnv("PRESET_AUTO_INDEXER_IMAGE_NAME", "kaito-autoindexer"),
 		ImageTag:     getEnv("PRESET_AUTO_INDEXER_IMAGE_TAG", "0.6.0"),
 	}
