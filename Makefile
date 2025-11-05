@@ -22,3 +22,9 @@ generate: controller-gen ## Generate code containing DeepCopy, DeepCopyInto, and
 manifests: controller-gen ## Generate WebhookConfiguration, ClusterRole, and CustomResourceDefinition objects.
 	$(CONTROLLER_GEN) rbac:roleName=manager-role crd webhook paths="./..." output:crd:artifacts:config=config/crd/bases
 	cp config/crd/bases/autoindexer.kaito.sh_autoindexers.yaml charts/kaito/autoindexer/crds/
+
+.PHONY: autoindexer-service-test
+autoindexer-service-test: ## Run AutoIndexer service tests with pytest.
+	pip install -r services/autoindexer/requirements-test.txt
+	pip install pytest-cov
+	pytest --cov -o log_cli=true -o log_cli_level=INFO services/autoindexer/tests
