@@ -23,8 +23,8 @@ manifests: controller-gen ## Generate WebhookConfiguration, ClusterRole, and Cus
 	$(CONTROLLER_GEN) rbac:roleName=manager-role crd webhook paths="./..." output:crd:artifacts:config=config/crd/bases
 	cp config/crd/bases/autoindexer.kaito.sh_autoindexers.yaml charts/kaito/autoindexer/crds/
 
-.PHONY: autoindexer-service-test
-autoindexer-service-test: ## Run AutoIndexer service tests with pytest.
-	pip install -r services/autoindexer/requirements-test.txt
+.PHONY: autoindexer-job-test
+autoindexer-job-test: ## Run AutoIndexer job tests with pytest.
+	pip install -r jobs/autoindexer/requirements-test.txt
 	pip install pytest-cov
-	pytest --cov -o log_cli=true -o log_cli_level=INFO services/autoindexer/tests
+	pytest --cov -o log_cli=true -o log_cli_level=INFO jobs/autoindexer/tests
