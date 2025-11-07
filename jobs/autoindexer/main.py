@@ -122,10 +122,11 @@ class AutoIndexerJob:
             )
         elif self.datasource_type.lower() == "git":
             return GitDataSourceHandler(
+                index_name=self.index_name,
                 config=self.datasource_config or {},
-                credentials=self.access_secret,
                 rag_client=self.rag_client,
-                autoindexer_client=self.autoindexer_client
+                autoindexer_client=self.autoindexer_client,
+                credentials=self.access_secret
             )
         else:
             raise ValueError(f"Unsupported data source type: {self.datasource_type}")
@@ -174,7 +175,8 @@ class AutoIndexerJob:
                         "branch": git_config.get("branch", "main"),
                         "commit": git_config.get("commit"),
                         "paths": git_config.get("paths", []),
-                        "excludePaths": git_config.get("excludePaths", [])
+                        "excludePaths": git_config.get("excludePaths", []),
+                        "lastIndexedCommit": git_config.get("status", {}).get("lastIndexedCommit", ""),
                     })
                     logger.info("Updated Git data source configuration from CRD")
                 

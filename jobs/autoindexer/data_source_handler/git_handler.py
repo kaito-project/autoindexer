@@ -13,11 +13,24 @@
 
 
 import logging
+import git
+import os
+import tempfile
+import shutil
+from datetime import UTC, datetime
 from typing import Any
+from pathlib import Path
 
-from autoindexer.data_source_handler.handler import DataSourceHandler
+from autoindexer.content_handler.factory import ContentHandlerFactory
+from autoindexer.data_source_handler.handler import (
+    DataSourceError,
+    DataSourceHandler,
+)
 from autoindexer.k8s.k8s_client import AutoIndexerK8sClient
 from autoindexer.rag.rag_client import KAITORAGClient
+from autoindexer.rag.utils import get_file_extension_language
+
+from kaito_rag_engine_client.models import Document
 
 logger = logging.getLogger(__name__)
 
@@ -29,8 +42,8 @@ class GitDataSourceHandler(DataSourceHandler):
     - Cloning Git repositories
     - Checking out specific branches or commits
     - Reading files from the repository
-    
-    NOTE: This is a placeholder for future implementation
+    - Incremental indexing based on commit diffs
+    - Full repository indexing for new repositories
     """
 
     def __init__(self, index_name: str, config: dict[str, Any], rag_client: KAITORAGClient, autoindexer_client: AutoIndexerK8sClient, credentials: str | None = None):
@@ -40,19 +53,461 @@ class GitDataSourceHandler(DataSourceHandler):
         self.credentials = credentials
         self.rag_client = rag_client
         self.autoindexer_client = autoindexer_client
-        raise NotImplementedError("Git data source handler is not yet implemented")
+        
+        # Initialize content handler factory
+        self.content_handler_factory = ContentHandlerFactory(config)
+        
+        # Validate required config
+        if not self.config.get("autoindexer_name"):
+            raise DataSourceError("Git data source configuration missing 'autoindexer_name' value")
+        if not self.config.get("repository"):
+            raise DataSourceError("Git data source configuration missing 'repository' value")
+
+        self.autoindexer_name = self.config.get("autoindexer_name")
+        self.repository = self.config.get("repository")
+        self.branch = self.config.get("branch", "main")
+        self.commit = self.config.get("commit")
+        self.paths = self.config.get("paths", [])
+        self.exclude_paths = self.config.get("excludePaths", [])
+        self.last_indexed_commit = self.config.get("lastIndexedCommit", "")
+        
+        # File extensions we support for indexing
+        self.supported_extensions = {
+            '.py', '.go', '.js', '.ts', '.java', '.cpp', '.c', '.h', '.hpp',
+            '.md', '.txt', '.rst', '.yaml', '.yml', '.json', '.toml', '.xml',
+            '.html', '.css', '.sql', '.sh', '.bash', '.dockerfile', '.rs',
+            '.rb', '.php', '.scala', '.kt', '.cs', '.swift'
+        }
+        
+        # Working directory for repository operations
+        self.work_dir = None
+        self.repo = None
+        self.errors = []
+        self.total_time = None
+
+        logger.info(f"Initialized git data source handler for repository: {self.repository}")
 
     def update_index(self) -> list[str]:
         """
-        Update the index with documents from the data source.
+        Update the index with documents from the Git repository.
 
         Returns:
             list[str]: List of error messages, if any
         """
-        raise NotImplementedError("Git data source handler is not yet implemented")
+        self.errors = []
+        start_time = datetime.now(UTC)
+        
+        try:
+            # Create temporary directory for repository operations
+            self.work_dir = tempfile.mkdtemp(prefix="autoindexer_git_")
+            logger.info(f"Created working directory: {self.work_dir}")
+            
+            # Clone or fetch repository
+            self._setup_repository()
+            
+            # Determine indexing strategy based on configuration
+            if self.commit:
+                # Specific commit requested - index all files at that commit
+                logger.info(f"Indexing specific commit: {self.commit}")
+                self._index_commit_files()
+            elif self.last_indexed_commit:
+                # Incremental indexing - process diff since last indexed commit
+                logger.info(f"Incremental indexing since commit: {self.last_indexed_commit}")
+                self._index_diff_files()
+            else:
+                # Full repository indexing - index all files in current branch/commit
+                logger.info("Full repository indexing")
+                self._index_all_files()
+                
+        except DataSourceError as e:
+            error_msg = f"Data source error: {e}"
+            logger.error(error_msg)
+            self.errors.append(error_msg)
+        except Exception as e:
+            error_msg = f"Unexpected error during Git indexing: {e}"
+            logger.error(error_msg, exc_info=True)
+            self.errors.append(error_msg)
+        finally:
+            # Cleanup working directory
+            if self.work_dir and os.path.exists(self.work_dir):
+                try:
+                    shutil.rmtree(self.work_dir)
+                    logger.info(f"Cleaned up working directory: {self.work_dir}")
+                except Exception as e:
+                    logger.warning(f"Failed to cleanup working directory: {e}")
+        
+        self.total_time = datetime.now(UTC) - start_time
+        return self.errors
+
+    def _setup_repository(self):
+        """Clone and setup the Git repository."""
+        try:
+            # Build clone URL with credentials if available
+            clone_url = self.repository
+            if self.credentials and "https://" in clone_url:
+                # Insert credentials into HTTPS URL
+                clone_url = clone_url.replace("https://", f"https://{self.credentials}@")
+            
+            logger.info(f"Cloning repository from {self.repository}")
+            self.repo = git.Repo.clone_from(clone_url, self.work_dir)
+            
+            # Checkout specific branch if specified
+            if self.branch != "main" and self.branch not in ["master", "HEAD"]:
+                try:
+                    self.repo.git.checkout(self.branch)
+                    logger.info(f"Checked out branch: {self.branch}")
+                except git.exc.GitCommandError as e:
+                    logger.warning(f"Failed to checkout branch {self.branch}: {e}")
+                    # Continue with default branch
+            
+            # Checkout specific commit if specified
+            if self.commit:
+                try:
+                    self.repo.git.checkout(self.commit)
+                    logger.info(f"Checked out commit: {self.commit}")
+                except git.exc.GitCommandError as e:
+                    raise DataSourceError(f"Failed to checkout commit {self.commit}: {e}")
+                    
+        except git.exc.GitCommandError as e:
+            raise DataSourceError(f"Failed to clone repository {self.repository}: {e}")
+        except Exception as e:
+            raise DataSourceError(f"Repository setup failed: {e}")
+
+    def _index_commit_files(self):
+        """Index all files at the specified commit."""
+        try:
+            # Get all files in the repository at this commit
+            files = self._get_repository_files()
+            documents = []
+            
+            for file_path in files:
+                if self._should_index_file(file_path):
+                    try:
+                        content = self._read_file_content(file_path)
+                        if content:
+                            doc = self._create_document(file_path, content, "commit")
+                            documents.append(doc)
+                            
+                            # Batch index documents
+                            if len(documents) >= 10:
+                                self._index_documents_batch(documents)
+                                documents = []
+                    except Exception as e:
+                        logger.warning(f"Failed to process file {file_path}: {e}")
+                        continue
+            
+            # Index remaining documents
+            if documents:
+                self._index_documents_batch(documents)
+                
+        except Exception as e:
+            raise DataSourceError(f"Failed to index commit files: {e}")
+
+    def _index_all_files(self):
+        """Index all files in the repository (full indexing)."""
+        try:
+            files = self._get_repository_files()
+            documents = []
+            
+            for file_path in files:
+                if self._should_index_file(file_path):
+                    try:
+                        content = self._read_file_content(file_path)
+                        if content:
+                            doc = self._create_document(file_path, content, "full")
+                            documents.append(doc)
+                            
+                            # Batch index documents
+                            if len(documents) >= 10:
+                                self._index_documents_batch(documents)
+                                documents = []
+                    except Exception as e:
+                        logger.warning(f"Failed to process file {file_path}: {e}")
+                        continue
+            
+            # Index remaining documents
+            if documents:
+                self._index_documents_batch(documents)
+                
+        except Exception as e:
+            raise DataSourceError(f"Failed to index all files: {e}")
+
+    def _index_diff_files(self):
+        """Index files based on diff since last indexed commit."""
+        try:
+            # Get the current commit
+            current_commit = self.repo.head.commit.hexsha
+            
+            # Get diff between last indexed commit and current commit
+            try:
+                diff_index = self.repo.commit(self.last_indexed_commit).diff(current_commit)
+            except git.exc.BadName:
+                logger.warning(f"Last indexed commit {self.last_indexed_commit} not found, performing full indexing")
+                self._index_all_files()
+                return
+            
+            create_docs = []
+            update_docs = []
+            delete_doc_ids = []
+            
+            for diff_item in diff_index:
+                file_path = diff_item.b_path or diff_item.a_path
+                
+                if not self._should_index_file(file_path):
+                    continue
+                
+                # Handle different change types
+                if diff_item.change_type == 'A':  # Added
+                    content = self._read_file_content(file_path)
+                    if content:
+                        doc = self._create_document(file_path, content, "added")
+                        create_docs.append(doc)
+                        
+                elif diff_item.change_type == 'M':  # Modified
+                    content = self._read_file_content(file_path)
+                    if content:
+                        doc = self._create_document(file_path, content, "modified")
+                        update_docs.append(doc)
+                        
+                elif diff_item.change_type == 'D':  # Deleted
+                    doc_id = self._generate_document_id(file_path)
+                    delete_doc_ids.append(doc_id)
+                    
+                elif diff_item.change_type == 'R':  # Renamed
+                    # Delete old document and create new one
+                    if diff_item.a_path:
+                        old_doc_id = self._generate_document_id(diff_item.a_path)
+                        delete_doc_ids.append(old_doc_id)
+                    
+                    content = self._read_file_content(file_path)
+                    if content:
+                        doc = self._create_document(file_path, content, "renamed")
+                        create_docs.append(doc)
+            
+            # Process all changes
+            if create_docs:
+                self._index_documents_batch(create_docs)
+            if update_docs:
+                self._index_documents_batch(update_docs)
+            if delete_doc_ids:
+                self._delete_documents_batch(delete_doc_ids)
+                
+            logger.info(f"Processed diff: {len(create_docs)} created, {len(update_docs)} updated, {len(delete_doc_ids)} deleted")
+            
+        except Exception as e:
+            raise DataSourceError(f"Failed to index diff files: {e}")
+
+    def _get_repository_files(self) -> list[str]:
+        """Get all files in the repository."""
+        files = []
+        
+        # If specific paths are configured, only process those
+        if self.paths:
+            for path in self.paths:
+                full_path = os.path.join(self.work_dir, path)
+                if os.path.isfile(full_path):
+                    files.append(path)
+                elif os.path.isdir(full_path):
+                    for root, _, filenames in os.walk(full_path):
+                        for filename in filenames:
+                            rel_path = os.path.relpath(os.path.join(root, filename), self.work_dir)
+                            files.append(rel_path)
+        else:
+            # Process all files in repository
+            for root, _, filenames in os.walk(self.work_dir):
+                # Skip .git directory
+                if '.git' in root:
+                    continue
+                for filename in filenames:
+                    rel_path = os.path.relpath(os.path.join(root, filename), self.work_dir)
+                    files.append(rel_path)
+        
+        return files
+
+    def _should_index_file(self, file_path: str) -> bool:
+        """Determine if a file should be indexed."""
+        # Check exclude paths
+        for exclude_path in self.exclude_paths:
+            if file_path.startswith(exclude_path):
+                return False
+        
+        # Check file extension
+        _, ext = os.path.splitext(file_path)
+        if ext.lower() not in self.supported_extensions:
+            return False
+        
+        # Skip hidden files and directories
+        if any(part.startswith('.') for part in Path(file_path).parts):
+            return False
+        
+        return True
+
+    def _read_file_content(self, file_path: str) -> str | None:
+        """Read content from a file."""
+        try:
+            full_path = os.path.join(self.work_dir, file_path)
+            with open(full_path, 'rb') as f:
+                raw_content = f.read()
+            
+            # Use content handler factory to extract text
+            content_type = self._get_content_type(file_path)
+            return self.content_handler_factory.extract_text(raw_content, content_type)
+            
+        except Exception as e:
+            logger.warning(f"Failed to read file {file_path}: {e}")
+            return None
+
+    def _get_content_type(self, file_path: str) -> str:
+        """Get content type based on file extension."""
+        _, ext = os.path.splitext(file_path)
+        ext = ext.lower()
+        
+        content_type_map = {
+            '.py': 'text/x-python',
+            '.go': 'text/x-go',
+            '.js': 'application/javascript',
+            '.ts': 'application/typescript',
+            '.java': 'text/x-java',
+            '.cpp': 'text/x-c++',
+            '.c': 'text/x-c',
+            '.h': 'text/x-c',
+            '.hpp': 'text/x-c++',
+            '.md': 'text/markdown',
+            '.txt': 'text/plain',
+            '.rst': 'text/x-rst',
+            '.yaml': 'application/x-yaml',
+            '.yml': 'application/x-yaml',
+            '.json': 'application/json',
+            '.toml': 'application/toml',
+            '.xml': 'application/xml',
+            '.html': 'text/html',
+            '.css': 'text/css',
+            '.sql': 'application/sql',
+            '.sh': 'application/x-sh',
+            '.bash': 'application/x-sh',
+        }
+        
+        return content_type_map.get(ext, 'text/plain')
+
+    def _create_document(self, file_path: str, content: str, change_type: str) -> Document:
+        """Create a document for indexing."""
+        metadata = {
+            "autoindexer": self.autoindexer_name,
+            "source_type": "git",
+            "repository": self.repository,
+            "branch": self.branch,
+            "file_path": file_path,
+            "change_type": change_type,
+            "timestamp": self._get_current_timestamp(),
+            "commit": self.repo.head.commit.hexsha if self.repo else None,
+        }
+        
+        # Add language metadata for code files
+        language = get_file_extension_language(os.path.splitext(file_path)[1])
+        if language:
+            metadata["language"] = language
+            metadata["split_type"] = "code"
+        
+        doc = Document(
+            text=content,
+            metadata=metadata
+        )
+        
+        return doc
+
+    def _generate_document_id(self, file_path: str) -> str:
+        """Generate a unique document ID for a file."""
+        return f"{self.autoindexer_name}:{self.repository}:{file_path}".replace("/", "_").replace(":", "_")
+
+    def _index_documents_batch(self, documents: list[Document]):
+        """Index a batch of documents."""
+        try:
+            logger.info(f"Indexing batch of {len(documents)} documents into index '{self.index_name}'")
+            self.rag_client.index_documents(index_name=self.index_name, documents=documents)
+        except Exception as e:
+            error_msg = f"Failed to index document batch: {e}"
+            logger.error(error_msg)
+            self.errors.append(error_msg)
+
+    def _delete_documents_batch(self, document_ids: list[str]):
+        """Delete a batch of documents."""
+        try:
+            logger.info(f"Deleting batch of {len(document_ids)} documents from index '{self.index_name}'")
+            for doc_id in document_ids:
+                self.rag_client.delete_document(index_name=self.index_name, document_id=doc_id)
+        except Exception as e:
+            error_msg = f"Failed to delete document batch: {e}"
+            logger.error(error_msg)
+            self.errors.append(error_msg)
+
+    def _get_current_timestamp(self) -> str:
+        """Get current timestamp in ISO format."""
+        return datetime.now(UTC).isoformat().replace('+00:00', 'Z')
     
     def update_autoindexer_status(self):
         """
         Update the AutoIndexer CRD status based on the current index state and indexing status.
         """
-        raise NotImplementedError("Git data source handler is not yet implemented")
+        current_ai = self.autoindexer_client.get_autoindexer()
+        current_status = current_ai["status"]
+
+        status_update = {
+            "lastIndexingTimestamp": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+            "lastIndexingDurationSeconds": self.total_time.seconds if self.total_time else 0,
+            "indexingPhase": "Completed",
+            "successfulIndexingCount": current_status.get("successfulIndexingCount", 0) + 1,
+            "numOfDocumentInIndex": 0,
+            "conditions": current_status.get("conditions", [])
+        }
+        
+        # Update last indexed commit if we have a repository
+        if self.repo:
+            status_update["lastIndexedCommit"] = self.repo.head.commit.hexsha
+        
+        try:
+            list_docs_resp = self.rag_client.list_documents(
+                self.index_name, 
+                metadata_filter={"autoindexer": self.autoindexer_name}, 
+                limit=1
+            )
+            logger.info(f"Document list response: {list_docs_resp}")
+            status_update["numOfDocumentInIndex"] = list_docs_resp["total_items"]
+        except Exception as e:
+            logger.error(f"Failed to list documents: {e}")
+
+        # Create conditions
+        conditions = {}
+        conditions["AutoIndexerSucceeded"] = self.autoindexer_client._create_condition(
+            "AutoIndexerSucceeded", "True", "IndexingCompleted", "Git indexing completed successfully"
+        )
+        
+        if self.errors:
+            conditions["AutoIndexerError"] = self.autoindexer_client._create_condition(
+                "AutoIndexerError", "True", "IndexingErrors", f"Git indexing completed with errors: {self.errors}"
+            )
+        else:
+            conditions["AutoIndexerError"] = self.autoindexer_client._create_condition(
+                "AutoIndexerError", "False", "IndexingCompleted", "No errors during Git indexing"
+            )
+            
+        conditions["AutoIndexerFailed"] = self.autoindexer_client._create_condition(
+            "AutoIndexerFailed", "False", "IndexingCompleted", "Git indexing completed successfully"
+        )
+        conditions["AutoIndexerIndexing"] = self.autoindexer_client._create_condition(
+            "AutoIndexerIndexing", "False", "IndexingCompleted", "Git document indexing process completed successfully"
+        )
+
+        # Update conditions
+        for condition_type, condition_data in conditions.items():
+            found = False
+            for i, existing_condition in enumerate(status_update["conditions"]):
+                if existing_condition.get("type") == condition_type:
+                    status_update["conditions"][i] = condition_data
+                    found = True
+                    break
+            
+            if not found:
+                status_update["conditions"].append(condition_data)
+
+        if not self.autoindexer_client.update_autoindexer_status(status_update, update_success_or_failure=True):
+            logger.error("Failed to update AutoIndexer status")
