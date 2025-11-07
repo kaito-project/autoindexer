@@ -13,9 +13,9 @@
 
 
 """
-AutoIndexer Service
+AutoIndexer Job
 
-This service handles document indexing from various data sources into KAITO RAG engines.
+This job handles document indexing from various data sources into KAITO RAG engines.
 It supports static file data sources and uses the KAITO RAG Client for document indexing.
 """
 
@@ -44,13 +44,13 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-class AutoIndexerService:
+class AutoIndexerJob:
     """
-    Main AutoIndexer service that coordinates document indexing from data sources to RAG engines.
+    Main AutoIndexer job that coordinates document indexing from data sources to RAG engines.
     """
 
     def __init__(self, dry_run: bool = False):
-        """Initialize the AutoIndexer service with environment variables."""
+        """Initialize the AutoIndexer job with environment variables."""
         self.dry_run = dry_run
         self.access_secret = ACCESS_SECRET
         self.autoindexer_name = AUTOINDEXER_NAME
@@ -240,10 +240,10 @@ class AutoIndexerService:
             # Calculate duration for failure case
             end_time = time.time()
             duration_seconds = int(end_time - start_time)
-            
-            logger.error(f"AutoIndexer service failed: {e}", exc_info=True)
-            self._update_status_condition("AutoIndexerError", "True", "ServiceError", f"AutoIndexer service failed: {str(e)}")
-            
+
+            logger.error(f"AutoIndexer job failed: {e}", exc_info=True)
+            self._update_status_condition("AutoIndexerError", "True", "ServiceError", f"AutoIndexer job failed: {str(e)}")
+
             # Try to get document count even in failure case
             try:
                 documents_response = self.rag_client.list_documents(self.index_name, metadata_filter={"autoindexer": self.autoindexer_name}, limit=1)
@@ -340,8 +340,8 @@ class AutoIndexerService:
 
 
 def main():
-    """Main entry point for the AutoIndexer service."""
-    parser = argparse.ArgumentParser(description="KAITO AutoIndexer Service")
+    """Main entry point for the AutoIndexer job."""
+    parser = argparse.ArgumentParser(description="KAITO AutoIndexer Job")
     parser.add_argument(
         "--mode",
         choices=["index"],
@@ -366,18 +366,18 @@ def main():
     logging.getLogger().setLevel(getattr(logging, args.log_level))
     
     try:
-        service = AutoIndexerService(dry_run=args.dry_run)
-        success = service.run()
-        
+        job = AutoIndexerJob(dry_run=args.dry_run)
+        success = job.run()
+
         if success:
-            logger.info("AutoIndexer service completed successfully")
+            logger.info("AutoIndexer job completed successfully")
             sys.exit(0)
         else:
-            logger.error("AutoIndexer service failed")
+            logger.error("AutoIndexer job failed")
             sys.exit(1)
             
     except Exception as e:
-        logger.error(f"Failed to initialize AutoIndexer service: {e}", exc_info=True)
+        logger.error(f"Failed to initialize AutoIndexer job: {e}", exc_info=True)
         sys.exit(1)
 
 
