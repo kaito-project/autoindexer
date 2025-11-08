@@ -45,12 +45,6 @@ class StaticDataSourceHandler(DataSourceHandler):
     - Source code files (.py, .go, .js, etc.)
     - Raw files from GitHub, GitLab, and other repositories
     - Direct text content provided in configuration
-    
-    PDF Processing Features:
-    - Automatic text extraction from PDF files using pdfplumber
-    - Table extraction from PDFs (when using pdfplumber)
-    - Multi-page document support with page markers
-    - Configurable file size limits for PDF downloads
     """
 
     def __init__(self, index_name: str, config: dict[str, Any], rag_client: KAITORAGClient, autoindexer_client: AutoIndexerK8sClient, credentials: str | None = None):
