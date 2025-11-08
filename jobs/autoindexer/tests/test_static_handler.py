@@ -293,7 +293,7 @@ class TestStaticDataSourceHandler:
 
     @patch('autoindexer.data_source_handler.static_handler.requests.get')
     def test_fetch_content_json_processing(self, mock_get, valid_config, mock_rag_client, mock_autoindexer_client):
-        """Test handling of JSON content with special processing."""
+        """Test handling of JSON content (returns raw JSON content)."""
         json_data = {"content": "This is the main content", "other": "ignored"}
         mock_response = Mock()
         mock_response.raise_for_status.return_value = None
@@ -304,7 +304,8 @@ class TestStaticDataSourceHandler:
         handler = StaticDataSourceHandler("test-index", valid_config, mock_rag_client, mock_autoindexer_client)
         content = handler._fetch_content_from_url("https://example.com/data.json")
         
-        assert content == "This is the main content"
+        # JSON content should be returned as a raw string (no special processing)
+        assert content == '{"content": "This is the main content", "other": "ignored"}'
 
     def test_is_pdf_content_content_type(self, valid_config, mock_rag_client, mock_autoindexer_client):
         """Test PDF detection based on content type."""
@@ -337,35 +338,14 @@ class TestStaticDataSourceHandler:
         assert handler.can_handle(pdf_content, '') is True
         assert handler.can_handle(text_content, '') is False
 
-    def test_extract_pdf_text_pypdf2_success(self, valid_config, mock_rag_client, mock_autoindexer_client):
-        """Test successful PDF text extraction using PyPDF2."""
+    def test_extract_pdf_text_pdfplumber_success(self, valid_config, mock_rag_client, mock_autoindexer_client):
+        """Test successful PDF text extraction using pdfplumber."""
         from autoindexer.content_handler.pdf_handler import PDFContentHandler
         
-        with patch('autoindexer.content_handler.pdf_handler.PyPDF2') as mock_pypdf2:
-            # Mock PyPDF2 module
+        with patch('autoindexer.content_handler.pdf_handler.pdfplumber') as mock_pdfplumber:
+            # Mock pdfplumber module
             mock_page = Mock()
             mock_page.extract_text.return_value = "Page content"
-            
-            mock_reader = Mock()
-            mock_reader.pages = [mock_page]
-            
-            mock_pypdf2.PdfReader.return_value = mock_reader
-            
-            handler = PDFContentHandler()
-            result = handler.extract_text(b'%PDF-1.4...', 'application/pdf')
-            
-            assert "Page content" in result
-            assert "--- Page 1 ---" in result
-
-    def test_extract_pdf_text_pdfplumber_fallback(self, valid_config, mock_rag_client, mock_autoindexer_client):
-        """Test PDF text extraction fallback to pdfplumber."""
-        from autoindexer.content_handler.pdf_handler import PDFContentHandler
-        
-        with patch('builtins.__import__') as mock_import:
-            # Mock pdfplumber module and PyPDF2 import error
-            mock_pdfplumber = Mock()
-            mock_page = Mock()
-            mock_page.extract_text.return_value = "Page content from pdfplumber"
             mock_page.extract_tables.return_value = []
             
             mock_pdf = Mock()
@@ -375,32 +355,46 @@ class TestStaticDataSourceHandler:
             
             mock_pdfplumber.open.return_value = mock_pdf
             
-            def import_side_effect(name, *args, **kwargs):
-                if name == 'PyPDF2':
-                    raise ImportError("PyPDF2 not available")
-                elif name == 'pdfplumber':
-                    return mock_pdfplumber
-                return __import__(name, *args, **kwargs)
+            handler = PDFContentHandler()
+            result = handler.extract_text(b'%PDF-1.4...', 'application/pdf')
             
-            mock_import.side_effect = import_side_effect
+            assert "Page content" in result
+            assert "--- Page 1 ---" in result
+
+    def test_extract_pdf_text_pdfplumber_with_tables(self, valid_config, mock_rag_client, mock_autoindexer_client):
+        """Test PDF text extraction with table extraction."""
+        from autoindexer.content_handler.pdf_handler import PDFContentHandler
+        
+        with patch('autoindexer.content_handler.pdf_handler.pdfplumber') as mock_pdfplumber:
+            # Mock pdfplumber module with tables
+            mock_page = Mock()
+            mock_page.extract_text.return_value = "Page content from pdfplumber"
+            mock_page.extract_tables.return_value = [
+                [["Header1", "Header2"], ["Row1Col1", "Row1Col2"], ["Row2Col1", "Row2Col2"]]
+            ]
+            
+            mock_pdf = Mock()
+            mock_pdf.pages = [mock_page]
+            mock_pdf.__enter__ = Mock(return_value=mock_pdf)
+            mock_pdf.__exit__ = Mock(return_value=None)
+            
+            mock_pdfplumber.open.return_value = mock_pdf
             
             handler = PDFContentHandler()
             result = handler.extract_text(b'%PDF-1.4...', 'application/pdf')
             
             assert "Page content from pdfplumber" in result
+            assert "--- Page 1 ---" in result
+            assert "--- Page 1 Table 1 ---" in result
+            assert "Header1 | Header2" in result
 
     def test_extract_pdf_text_no_libraries(self, valid_config, mock_rag_client, mock_autoindexer_client):
-        """Test PDF text extraction failure when no libraries are available."""
+        """Test PDF text extraction failure when pdfplumber is not available."""
         from autoindexer.content_handler.pdf_handler import PDFContentHandler
         from autoindexer.content_handler.base import ContentHandlingError
         
-        with patch('builtins.__import__') as mock_import:
-            def import_side_effect(name, *args, **kwargs):
-                if name in ['PyPDF2', 'pdfplumber']:
-                    raise ImportError(f"{name} not available")
-                return __import__(name, *args, **kwargs)
-            
-            mock_import.side_effect = import_side_effect
+        with patch('autoindexer.content_handler.pdf_handler.pdfplumber') as mock_pdfplumber:
+            mock_pdfplumber.open.side_effect = ImportError("pdfplumber not available")
             
             handler = PDFContentHandler()
             

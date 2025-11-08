@@ -12,7 +12,6 @@
 # limitations under the License.
 
 import contextlib
-import json
 import logging
 from typing import Any
 
@@ -27,10 +26,10 @@ class TextContentHandler(BaseContentHandler):
     
     This handler supports:
     - Various text encodings (UTF-8, Latin1, etc.) with automatic detection
-    - JSON content with intelligent text extraction
     - Plain text files (.txt, .md, .rst, etc.)
     - Configuration files (.json, .yaml, .toml, etc.)
     - Source code files (.py, .go, .js, etc.)
+    - CSV files
     - HTML and XML content
     - Fallback encoding handling with error recovery
     """
@@ -61,7 +60,8 @@ class TextContentHandler(BaseContentHandler):
         # Check for common text content types
         text_content_types = [
             'text/', 'application/json', 'application/xml', 'application/yaml',
-            'application/javascript', 'application/x-yaml', 'application/toml'
+            'application/javascript', 'application/x-yaml', 'application/toml',
+            'text/csv'
         ]
         
         content_type_lower = content_type.lower()
@@ -146,25 +146,6 @@ class TextContentHandler(BaseContentHandler):
             try:
                 decoded_content = raw_content.decode(enc)
                 logger.debug(f"Successfully decoded content using encoding: {enc}")
-                
-                # Handle specific content types
-                if 'application/json' in content_type:
-                    try:
-                        json_data = json.loads(decoded_content)
-                        # Try to extract text content from JSON
-                        if isinstance(json_data, dict):
-                            if 'content' in json_data:
-                                return str(json_data['content'])
-                            elif 'text' in json_data:
-                                return str(json_data['text'])
-                            elif 'body' in json_data:
-                                return str(json_data['body'])
-                        # Return formatted JSON as string
-                        return json.dumps(json_data, indent=2, ensure_ascii=False)
-                    except json.JSONDecodeError:
-                        # If JSON parsing fails, return as plain text
-                        pass
-                
                 return decoded_content
                 
             except UnicodeDecodeError:

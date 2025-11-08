@@ -20,11 +20,11 @@ import pytest
 from requests.exceptions import RequestException
 
 from autoindexer.data_source_handler.handler import DataSourceError
-from autoindexer.main import AutoIndexerService, main
+from autoindexer.main import AutoIndexerJob, main
 
 
-class TestAutoIndexerService:
-    """Integration tests for AutoIndexer service."""
+class TestAutoIndexerJob:
+    """Integration tests for AutoIndexer job."""
 
     @pytest.fixture
     def valid_env_vars(self):
@@ -90,7 +90,7 @@ class TestAutoIndexerService:
         """Test successful initialization with static data source."""
         with patch.dict(os.environ, valid_env_vars):
             try:
-                service = AutoIndexerService()
+                service = AutoIndexerJob()
 
                 assert service.access_secret == "test-secret"
                 assert service.autoindexer_name == "test-autoindexer"
@@ -145,7 +145,7 @@ class TestAutoIndexerService:
         }
         
         with patch.dict(os.environ, valid_env_vars):
-            service = AutoIndexerService()
+            service = AutoIndexerJob()
             
             assert service.datasource_type == "Git"
             assert service.datasource_config["repository"] == "https://github.com/test/repo.git"
@@ -159,7 +159,7 @@ class TestAutoIndexerService:
         
         with patch.dict(os.environ, incomplete_env, clear=True), \
              pytest.raises(ValueError, match="RAG engine endpoint must be configured"):
-            AutoIndexerService()
+            AutoIndexerJob()
 
     def test_init_k8s_client_failure(self, valid_env_vars):
         """Test handling of Kubernetes client initialization failure."""
@@ -168,7 +168,7 @@ class TestAutoIndexerService:
             
             with patch.dict(os.environ, valid_env_vars), \
                  pytest.raises(Exception, match="K8s connection failed"):
-                AutoIndexerService()
+                AutoIndexerJob()
 
     def test_init_invalid_crd_config_missing_index_name(self, valid_env_vars, mock_rag_client, mock_static_handler):
         """Test initialization failure with invalid CRD config missing index name."""
@@ -186,7 +186,7 @@ class TestAutoIndexerService:
             
             with patch.dict(os.environ, valid_env_vars), \
                  pytest.raises(ValueError, match="indexName must be specified"):
-                AutoIndexerService()
+                AutoIndexerJob()
 
     def test_init_unsupported_data_source_type(self, valid_env_vars, mock_k8s_client, mock_rag_client):
         """Test initialization failure with unsupported data source type."""
@@ -201,12 +201,12 @@ class TestAutoIndexerService:
         
         with patch.dict(os.environ, valid_env_vars), \
              pytest.raises(ValueError, match="Unsupported or missing data source configuration in CRD"):
-            AutoIndexerService()
+            AutoIndexerJob()
 
     def test_run_success(self, valid_env_vars, mock_k8s_client, mock_rag_client, mock_static_handler):
         """Test successful indexing run."""
         with patch.dict(os.environ, valid_env_vars):
-            service = AutoIndexerService()
+            service = AutoIndexerJob()
             
             # Mock successful indexing on the actual instances
             service.data_source_handler.update_index.return_value = []  # No errors
@@ -228,7 +228,7 @@ class TestAutoIndexerService:
     def test_run_with_indexing_errors(self, valid_env_vars, mock_k8s_client, mock_rag_client, mock_static_handler):
         """Test run with indexing errors."""
         with patch.dict(os.environ, valid_env_vars):
-            service = AutoIndexerService()
+            service = AutoIndexerJob()
             
             # Mock indexing with errors
             service.data_source_handler.update_index.return_value = ["Error fetching document", "Network timeout"]
@@ -250,7 +250,7 @@ class TestAutoIndexerService:
     def test_run_with_exception(self, valid_env_vars, mock_k8s_client, mock_rag_client, mock_static_handler):
         """Test run with unexpected exception."""
         with patch.dict(os.environ, valid_env_vars):
-            service = AutoIndexerService()
+            service = AutoIndexerJob()
             
             # Mock exception during indexing
             service.data_source_handler.update_index.side_effect = Exception("Unexpected error")
@@ -267,7 +267,7 @@ class TestAutoIndexerService:
     def test_run_dry_run_mode(self, valid_env_vars, mock_k8s_client, mock_rag_client, mock_static_handler):
         """Test dry run mode."""
         with patch.dict(os.environ, valid_env_vars):
-            service = AutoIndexerService(dry_run=True)
+            service = AutoIndexerJob(dry_run=True)
             
             assert service.dry_run is True
             
@@ -278,7 +278,7 @@ class TestAutoIndexerService:
     def test_update_index_data_source_error(self, valid_env_vars, mock_k8s_client, mock_rag_client, mock_static_handler):
         """Test _update_index with DataSourceError."""
         with patch.dict(os.environ, valid_env_vars):
-            service = AutoIndexerService()
+            service = AutoIndexerJob()
             
             # Mock DataSourceError
             service.data_source_handler.update_index.side_effect = DataSourceError("Data source failed")
@@ -291,7 +291,7 @@ class TestAutoIndexerService:
     def test_update_index_unexpected_error(self, valid_env_vars, mock_k8s_client, mock_rag_client, mock_static_handler):
         """Test _update_index with unexpected error."""
         with patch.dict(os.environ, valid_env_vars):
-            service = AutoIndexerService()
+            service = AutoIndexerJob()
             
             # Mock unexpected error
             service.data_source_handler.update_index.side_effect = RuntimeError("Unexpected runtime error")
@@ -304,7 +304,7 @@ class TestAutoIndexerService:
     def test_ensure_index_exists_index_present(self, valid_env_vars, mock_k8s_client, mock_rag_client, mock_static_handler):
         """Test _ensure_index_exists when index already exists."""
         with patch.dict(os.environ, valid_env_vars):
-            service = AutoIndexerService()
+            service = AutoIndexerJob()
             
             service.rag_client.list_indexes.return_value = {
                 "indexes": [{"name": "test-index"}, {"name": "other-index"}]
@@ -318,7 +318,7 @@ class TestAutoIndexerService:
     def test_ensure_index_exists_index_missing(self, valid_env_vars, mock_k8s_client, mock_rag_client, mock_static_handler):
         """Test _ensure_index_exists when index doesn't exist."""
         with patch.dict(os.environ, valid_env_vars):
-            service = AutoIndexerService()
+            service = AutoIndexerJob()
             
             service.rag_client.list_indexes.return_value = {
                 "indexes": [{"name": "other-index"}]
@@ -332,7 +332,7 @@ class TestAutoIndexerService:
     def test_ensure_index_exists_rag_error(self, valid_env_vars, mock_k8s_client, mock_rag_client, mock_static_handler):
         """Test _ensure_index_exists when RAG client raises error."""
         with patch.dict(os.environ, valid_env_vars):
-            service = AutoIndexerService()
+            service = AutoIndexerJob()
             
             mock_rag_client.list_indexes.side_effect = RequestException("RAG engine unavailable")
             
@@ -346,12 +346,12 @@ class TestAutoIndexerService:
             
             with patch.dict(os.environ, valid_env_vars), \
                  pytest.raises(Exception):
-                AutoIndexerService()
+                AutoIndexerJob()
 
     def test_status_updates_k8s_client_errors(self, valid_env_vars, mock_k8s_client, mock_rag_client, mock_static_handler):
         """Test status update methods when K8s client operations fail."""
         with patch.dict(os.environ, valid_env_vars):
-            service = AutoIndexerService()
+            service = AutoIndexerJob()
             
             # Mock K8s client methods to raise exceptions
             mock_k8s_client.add_status_condition.side_effect = Exception("K8s API error")
@@ -393,7 +393,7 @@ class TestAutoIndexerService:
             mock_class.return_value = mock_client
             
             with patch.dict(os.environ, valid_env_vars):
-                service = AutoIndexerService()
+                service = AutoIndexerJob()
                 
                 assert service.index_name == "git-index"
                 assert service.datasource_type == "Git"
@@ -409,7 +409,7 @@ class TestAutoIndexerService:
         env_vars = {**valid_env_vars, "TEST_JSON_CONFIG": json.dumps(json_config)}
         
         with patch.dict(os.environ, env_vars):
-            service = AutoIndexerService()
+            service = AutoIndexerJob()
             
             result = service._get_optional_env_json("TEST_JSON_CONFIG")
             assert result == json_config
@@ -419,7 +419,7 @@ class TestAutoIndexerService:
         env_vars = {**valid_env_vars, "INVALID_JSON": "not valid json {"}
         
         with patch.dict(os.environ, env_vars):
-            service = AutoIndexerService()
+            service = AutoIndexerJob()
             
             result = service._get_optional_env_json("INVALID_JSON")
             assert result is None
@@ -427,7 +427,7 @@ class TestAutoIndexerService:
     def test_optional_env_json_missing(self, valid_env_vars, mock_k8s_client, mock_rag_client, mock_static_handler):
         """Test parsing of missing JSON environment variables."""
         with patch.dict(os.environ, valid_env_vars):
-            service = AutoIndexerService()
+            service = AutoIndexerJob()
             
             result = service._get_optional_env_json("MISSING_JSON")
             assert result is None
@@ -441,7 +441,7 @@ class TestMainFunction:
         test_args = ["main.py"]  # Default mode=index, no dry-run
         
         with patch('sys.argv', test_args), \
-             patch('autoindexer.main.AutoIndexerService') as mock_service_class, \
+             patch('autoindexer.main.AutoIndexerJob') as mock_service_class, \
              patch('sys.exit') as mock_exit:
             mock_service = Mock()
             mock_service.run.return_value = True
@@ -458,7 +458,7 @@ class TestMainFunction:
         test_args = ["main.py", "--dry-run"]
         
         with patch('sys.argv', test_args), \
-             patch('autoindexer.main.AutoIndexerService') as mock_service_class, \
+             patch('autoindexer.main.AutoIndexerJob') as mock_service_class, \
              patch('sys.exit') as mock_exit:
             mock_service = Mock()
             mock_service.run.return_value = True
@@ -474,7 +474,7 @@ class TestMainFunction:
         test_args = ["main.py"]
         
         with patch('sys.argv', test_args), \
-             patch('autoindexer.main.AutoIndexerService') as mock_service_class, \
+             patch('autoindexer.main.AutoIndexerJob') as mock_service_class, \
              patch('sys.exit') as mock_exit:
             mock_service = Mock()
             mock_service.run.return_value = False
@@ -489,7 +489,7 @@ class TestMainFunction:
         test_args = ["main.py"]
         
         with patch('sys.argv', test_args), \
-             patch('autoindexer.main.AutoIndexerService') as mock_service_class, \
+             patch('autoindexer.main.AutoIndexerJob') as mock_service_class, \
              patch('sys.exit') as mock_exit:
             mock_service_class.side_effect = Exception("Initialization failed")
             
@@ -502,7 +502,7 @@ class TestMainFunction:
         test_args = ["main.py", "--log-level", "DEBUG"]
         
         with patch('sys.argv', test_args), \
-             patch('autoindexer.main.AutoIndexerService') as mock_service_class, \
+             patch('autoindexer.main.AutoIndexerJob') as mock_service_class, \
              patch('logging.getLogger') as mock_get_logger, \
              patch('sys.exit'):
             mock_service = Mock()
@@ -522,7 +522,7 @@ class TestMainFunction:
         test_args = ["main.py", "--mode", "index"]
         
         with patch('sys.argv', test_args), \
-             patch('autoindexer.main.AutoIndexerService') as mock_service_class, \
+             patch('autoindexer.main.AutoIndexerJob') as mock_service_class, \
              patch('sys.exit') as mock_exit:
             mock_service = Mock()
             mock_service.run.return_value = True

@@ -15,7 +15,7 @@ import io
 import logging
 from typing import Any
 
-import PyPDF2
+import pdfplumber
 
 from .base import BaseContentHandler, ContentHandlingError
 
@@ -27,11 +27,9 @@ class PDFContentHandler(BaseContentHandler):
     Handler for PDF content extraction.
     
     This handler supports:
-    - Automatic text extraction from PDF files using PyPDF2 and pdfplumber
-    - Table extraction from PDFs (when using pdfplumber)
+    - Automatic text extraction from PDF files using pdfplumber
+    - Table extraction from PDFs
     - Multi-page document support with page markers
-    - Fallback between extraction methods for better compatibility
-    - Configurable file size limits for PDF processing
     """
     
     def __init__(self, config: dict[str, Any] | None = None):
@@ -63,10 +61,11 @@ class PDFContentHandler(BaseContentHandler):
             return True
 
         try:
-            pdf_stream = io.BytesIO(raw_content)
-            pdf_reader = PyPDF2.PdfReader(pdf_stream)
-
-            return len(pdf_reader.pages) > 0
+            with pdfplumber.open(io.BytesIO(raw_content)) as pdf:
+                if not pdf.pages:  # check if any pages exist
+                    logger.warning("PDF has no pages")
+                    return False
+            return True
         except Exception as e:
             logger.warning(f"Failed to read PDF content: {e}")
         return False
@@ -86,78 +85,45 @@ class PDFContentHandler(BaseContentHandler):
             ContentHandlingError: If extraction fails
         """
         extracted_text = ""
-        
-        # Try PyPDF2 first (lighter weight)
         try:
+            
             pdf_stream = io.BytesIO(raw_content)
-            pdf_reader = PyPDF2.PdfReader(pdf_stream)
             
-            logger.info(f"PDF has {len(pdf_reader.pages)} pages")
-            
-            text_parts = []
-            for page_num, page in enumerate(pdf_reader.pages, 1):
-                try:
-                    page_text = page.extract_text()
-                    if page_text.strip():
-                        text_parts.append(f"--- Page {page_num} ---\n{page_text.strip()}")
-                        logger.debug(f"Extracted {len(page_text)} characters from page {page_num}")
-                except Exception as e:
-                    logger.warning(f"Failed to extract text from page {page_num}: {e}")
-                    continue
-            
-            if text_parts:
-                extracted_text = "\n\n".join(text_parts)
-                logger.info(f"Successfully extracted {len(extracted_text)} characters from PDF using PyPDF2")
-            else:
-                logger.warning("No text extracted from PDF using PyPDF2, trying alternative method")
+            with pdfplumber.open(pdf_stream) as pdf:
+                logger.info(f"PDF has {len(pdf.pages)} pages (pdfplumber)")
+                
+                text_parts = []
+                for page_num, page in enumerate(pdf.pages, 1):
+                    try:
+                        page_text = page.extract_text()
+                        if page_text and page_text.strip():
+                            text_parts.append(f"--- Page {page_num} ---\n{page_text.strip()}")
+                            logger.debug(f"Extracted {len(page_text)} characters from page {page_num} using pdfplumber")
+                        
+                        # Also try to extract tables if available
+                        tables = page.extract_tables()
+                        if tables:
+                            for table_num, table in enumerate(tables, 1):
+                                try:
+                                    # Convert table to text format
+                                    table_text = self._table_to_text(table)
+                                    if table_text.strip():
+                                        text_parts.append(f"--- Page {page_num} Table {table_num} ---\n{table_text.strip()}")
+                                except Exception as e:
+                                    logger.debug(f"Failed to extract table {table_num} from page {page_num}: {e}")
+                                    
+                    except Exception as e:
+                        logger.warning(f"Failed to extract text from page {page_num} using pdfplumber: {e}")
+                        continue
+                
+                if text_parts:
+                    extracted_text = "\n\n".join(text_parts)
+                    logger.info(f"Successfully extracted {len(extracted_text)} characters from PDF using pdfplumber")
                 
         except ImportError:
-            logger.debug("PyPDF2 not available")
+            logger.debug("pdfplumber not available")
         except Exception as e:
-            logger.warning(f"PyPDF2 extraction failed: {e}, trying alternative method")
-        
-        # If PyPDF2 didn't work or extracted no text, try pdfplumber
-        if not extracted_text.strip():
-            try:
-                import pdfplumber
-                
-                pdf_stream = io.BytesIO(raw_content)
-                
-                with pdfplumber.open(pdf_stream) as pdf:
-                    logger.info(f"PDF has {len(pdf.pages)} pages (pdfplumber)")
-                    
-                    text_parts = []
-                    for page_num, page in enumerate(pdf.pages, 1):
-                        try:
-                            page_text = page.extract_text()
-                            if page_text and page_text.strip():
-                                text_parts.append(f"--- Page {page_num} ---\n{page_text.strip()}")
-                                logger.debug(f"Extracted {len(page_text)} characters from page {page_num} using pdfplumber")
-                            
-                            # Also try to extract tables if available
-                            tables = page.extract_tables()
-                            if tables:
-                                for table_num, table in enumerate(tables, 1):
-                                    try:
-                                        # Convert table to text format
-                                        table_text = self._table_to_text(table)
-                                        if table_text.strip():
-                                            text_parts.append(f"--- Page {page_num} Table {table_num} ---\n{table_text.strip()}")
-                                    except Exception as e:
-                                        logger.debug(f"Failed to extract table {table_num} from page {page_num}: {e}")
-                                        
-                        except Exception as e:
-                            logger.warning(f"Failed to extract text from page {page_num} using pdfplumber: {e}")
-                            continue
-                    
-                    if text_parts:
-                        extracted_text = "\n\n".join(text_parts)
-                        logger.info(f"Successfully extracted {len(extracted_text)} characters from PDF using pdfplumber")
-                    
-            except ImportError:
-                logger.debug("pdfplumber not available")
-            except Exception as e:
-                logger.error(f"pdfplumber extraction failed: {e}")
+            logger.error(f"pdfplumber extraction failed: {e}")
         
         # Final validation
         if not extracted_text.strip():

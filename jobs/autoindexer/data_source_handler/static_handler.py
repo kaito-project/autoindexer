@@ -47,10 +47,9 @@ class StaticDataSourceHandler(DataSourceHandler):
     - Direct text content provided in configuration
     
     PDF Processing Features:
-    - Automatic text extraction from PDF files using PyPDF2 and pdfplumber
+    - Automatic text extraction from PDF files using pdfplumber
     - Table extraction from PDFs (when using pdfplumber)
     - Multi-page document support with page markers
-    - Fallback between extraction methods for better compatibility
     - Configurable file size limits for PDF downloads
     """
 
@@ -238,7 +237,7 @@ class StaticDataSourceHandler(DataSourceHandler):
             
             # Make request with timeout and streaming for large files
             timeout = self.config.get("timeout", 60)  # Increased timeout for file downloads
-            max_size = self.config.get("max_file_size", 10 * 1024 * 1024)  # 10MB default limit
+            max_size = self.config.get("max_file_size", 100 * 1024 * 1024)  # 100MB default limit
             
             logger.info(f"Fetching content from {url}")
             with requests.get(url, headers=headers, timeout=timeout, stream=True) as response:
