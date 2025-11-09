@@ -1,0 +1,13 @@
+apiVersion: autoindexer.kaito.sh/v1alpha1
+kind: AutoIndexer
+metadata:
+  name: autoindexer-git-cron
+spec:
+  ragEngine: ragengine
+  indexName: autoindex-git-test
+  schedule: "*/5 * * * *" # Every 5 minutes
+  dataSource:
+    type: Git
+    git:
+      repository: "https://github.com/kaito-project/kaito.git"
+      branch: "main"

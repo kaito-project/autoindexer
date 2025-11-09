@@ -34,7 +34,7 @@ class KAITORAGClient:
 
         documents: list of Document objects
         """
-        return create_index.sync(self.client, index_request=IndexRequest(index_name=index_name, documents=documents))
+        return create_index.sync(client=self.client, body=IndexRequest(index_name=index_name, documents=documents))
 
     def update_documents(self, index_name: str, documents: list[Document]):
         """
@@ -42,7 +42,7 @@ class KAITORAGClient:
 
         documents: list of Document objects
         """
-        return update_documents_in_index.sync(self.client, index_name=index_name, body=UpdateDocumentRequest(documents=documents))
+        return update_documents_in_index.sync(client=self.client, index_name=index_name, body=UpdateDocumentRequest(documents=documents))
 
     def delete_documents(self, index_name: str, document_ids: list[str]):
         """
@@ -50,7 +50,7 @@ class KAITORAGClient:
 
         document_ids: list of document IDs to delete
         """
-        return delete_documents_in_index.sync(self.client, index_name=index_name, body=DeleteDocumentRequest(doc_ids=document_ids))
+        return delete_documents_in_index.sync(client=self.client, index_name=index_name, body=DeleteDocumentRequest(doc_ids=document_ids))
 
     def list_documents(self, index_name: str, metadata_filter: dict, limit: int = 10, offset: int = 0):
         """
@@ -60,13 +60,13 @@ class KAITORAGClient:
         limit: number of documents to return
         offset: offset for pagination
         """
-        return list_documents_in_index.sync(self.client, index_name=index_name, metadata_filter=metadata_filter, limit=limit, offset=offset)
+        return list_documents_in_index.sync(client=self.client, index_name=index_name, metadata_filter=metadata_filter, limit=limit, offset=offset)
 
     def list_indexes(self):
         """
         List all indexes in the RAGEngine.
         """
-        return list_indexes.sync(self.client)
+        return list_indexes.sync(client=self.client)
 
     def persist_index(self, index_name: str, path: str = "/tmp"):
         """
@@ -75,7 +75,7 @@ class KAITORAGClient:
         index_name: name of the index to persist
         path: path to persist the index
         """
-        return persist_index.sync(self.client, index_name=index_name, path=path)
+        return persist_index.sync(client=self.client, index_name=index_name, path=path)
 
     def load_index(self, index_name: str, path: str = "/tmp", overwrite: bool = True):
         """
@@ -85,7 +85,7 @@ class KAITORAGClient:
         path: path to load the index from
         overwrite: whether to overwrite the existing index
         """
-        return load_index.sync(self.client, index_name=index_name, path=path, overwrite=overwrite)
+        return load_index.sync(client=self.client, index_name=index_name, path=path, overwrite=overwrite)
 
     def delete_index(self, index_name: str):
         """
@@ -93,4 +93,4 @@ class KAITORAGClient:
 
         index_name: name of the index to delete
         """
-        return delete_index.sync(self.client, index_name=index_name)
+        return delete_index.sync(client=self.client, index_name=index_name)

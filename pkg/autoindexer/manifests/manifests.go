@@ -417,7 +417,7 @@ func GenerateRoleManifest(autoIndexer *v1alpha1.AutoIndexer) *rbacv1.Role {
 		},
 		Rules: []rbacv1.PolicyRule{
 			{
-				APIGroups:     []string{"kaito.sh"},
+				APIGroups:     []string{"autoindexer.kaito.sh"},
 				Resources:     []string{"autoindexers", "autoindexers/status"},
 				Verbs:         []string{"get", "list", "watch", "update", "patch"},
 				ResourceNames: []string{autoIndexer.Name},

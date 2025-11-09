@@ -5,10 +5,10 @@ metadata:
   labels:
     {{- include "kaito.labels" . | nindent 4 }}
 rules:
-  - apiGroups: ["kaito.sh"]
+  - apiGroups: ["autoindexer.kaito.sh"]
     resources: ["autoindexers"]
     verbs: ["update","patch","get","list","watch"]
-  - apiGroups: ["kaito.sh"]
+  - apiGroups: ["autoindexer.kaito.sh"]
     resources: ["autoindexers/status"]
     verbs: ["update","patch","get","list","watch"]
   - apiGroups: ["kaito.sh"]

@@ -53,7 +53,7 @@ def mock_core_api():
 def sample_autoindexer_crd():
     """Sample AutoIndexer CRD object."""
     return {
-        "apiVersion": "kaito.sh/v1alpha1",
+        "apiVersion": "autoindexer.kaito.sh/v1alpha1",
         "kind": "AutoIndexer",
         "metadata": {
             "name": "test-autoindexer",
@@ -174,7 +174,7 @@ class TestAutoIndexerK8sClient:
             
             assert result == sample_autoindexer_crd
             mock_custom_api.get_namespaced_custom_object.assert_called_once_with(
-                group="kaito.sh",
+                group="autoindexerkaito.sh",
                 version="v1alpha1",
                 namespace="default",
                 plural="autoindexers",
