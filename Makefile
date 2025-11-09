@@ -33,7 +33,7 @@ autoindexer-job-test: ## Run AutoIndexer job tests with pytest.
 ## Docker
 ## --------------------------------------
 
-REGISTRY ?= brfoletest.azurecr.io
+REGISTRY ?=
 
 AUTOINDEXER_JOB_IMG_NAME ?= autoindexer-job
 AUTOINDEXER_JOB_IMG_TAG ?= latest
