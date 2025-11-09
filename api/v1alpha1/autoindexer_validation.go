@@ -125,6 +125,7 @@ func (g *GitDataSourceSpec) validate() *apis.FieldError {
 		patSimple           = regexp.MustCompile(`^([a-zA-Z0-9._-]+)(/[a-zA-Z0-9._-]+)*$`)
 		patStar             = regexp.MustCompile(`^(\*|\*\*/[a-zA-Z0-9._-]+|[a-zA-Z0-9._-]+/\*|[a-zA-Z0-9._-]+/\*\.[a-zA-Z0-9]+|\*\.[a-zA-Z0-9]+)$`)
 		patGlobstar         = regexp.MustCompile(`^(\*\*/[a-zA-Z0-9._-]+(/[a-zA-Z0-9._-]+)*)$`)
+		patGlobstarExt      = regexp.MustCompile(`^\*\*/\*\.[a-zA-Z0-9]+$`)
 		patTrailingGlobstar = regexp.MustCompile(`^([a-zA-Z0-9._-]+(/[a-zA-Z0-9._-]+)*)/\*\*$`)
 		patMiddleGlobstar   = regexp.MustCompile(`^([a-zA-Z0-9._-]+/)?\*\*/[a-zA-Z0-9._-]+(/[a-zA-Z0-9._-]+)*$`)
 	)
@@ -139,6 +140,9 @@ func (g *GitDataSourceSpec) validate() *apis.FieldError {
 			return true
 		}
 		if patGlobstar.MatchString(p) {
+			return true
+		}
+		if patGlobstarExt.MatchString(p) {
 			return true
 		}
 		if patTrailingGlobstar.MatchString(p) {

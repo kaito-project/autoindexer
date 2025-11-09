@@ -11,6 +11,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import json
 from kaito_rag_engine_client import Client
 from kaito_rag_engine_client.models import IndexRequest, Document, UpdateDocumentRequest, DeleteDocumentRequest
 from kaito_rag_engine_client.api.index import list_indexes, create_index, delete_index, list_documents_in_index, delete_documents_in_index, update_documents_in_index, persist_index, load_index
@@ -60,7 +61,7 @@ class KAITORAGClient:
         limit: number of documents to return
         offset: offset for pagination
         """
-        return list_documents_in_index.sync(client=self.client, index_name=index_name, metadata_filter=metadata_filter, limit=limit, offset=offset)
+        return list_documents_in_index.sync(client=self.client, index_name=index_name, metadata_filter=json.dumps(metadata_filter), limit=limit, offset=offset)
 
     def list_indexes(self):
         """

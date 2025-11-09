@@ -91,7 +91,7 @@ class StaticDataSourceHandler(DataSourceHandler):
         try:
             list_docs_resp = self.rag_client.list_documents(self.index_name, metadata_filter={"autoindexer": self.autoindexer_name}, limit=1)
             logger.info(f"Document list response: {list_docs_resp}")
-            status_update["numOfDocumentInIndex"] = list_docs_resp["total_items"]
+            status_update["numOfDocumentInIndex"] = list_docs_resp.total_items
         except Exception as e:
             logger.error(f"Failed to list documents: {e}")
 

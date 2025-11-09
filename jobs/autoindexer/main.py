@@ -72,7 +72,7 @@ class AutoIndexerJob:
             logger.info("Kubernetes client initialized successfully")
             
             # Try to get configuration from the AutoIndexer CRD
-            crd_config = self.k8s_client.get_autoindexer_config()
+            crd_config = self.k8s_client.get_autoindexer()
             if crd_config:
                 logger.info("Found AutoIndexer CRD configuration, using it to supplement environment config")
                 self._apply_crd_config(crd_config)
@@ -134,17 +134,19 @@ class AutoIndexerJob:
     def _apply_crd_config(self, crd_config: dict[str, Any]):
         """Apply configuration from AutoIndexer CRD to supplement environment variables."""
         try:
+            logger.info("Applying configuration from AutoIndexer CRD")
+            crd_spec = crd_config.get("spec", {})
             # Update index name from CRD if not set via environment
-            if crd_config.get("indexName"):
-                self.index_name = crd_config["indexName"]
+            if crd_spec.get("indexName"):
+                self.index_name = crd_spec["indexName"]
                 logger.info(f"Using index name from CRD: {self.index_name}")
             else:
                 raise ValueError("indexName must be specified via autoindexer CRD")
             
             # Update RAG engine endpoint from CRD if not set via environment
-            if crd_config.get("ragEngine"):
+            if crd_spec.get("ragEngine"):
                 # Construct endpoint from RAG engine name (assuming same namespace)
-                rag_engine_name = crd_config["ragEngine"]
+                rag_engine_name = crd_spec["ragEngine"]
                 namespace = self.k8s_client.namespace if self.k8s_client else "default"
                 self.ragengine_endpoint = f"http://{rag_engine_name}.{namespace}.svc.cluster.local:80"
                 logger.info(f"Using RAG engine endpoint from CRD: {self.ragengine_endpoint}")
@@ -152,8 +154,8 @@ class AutoIndexerJob:
                 raise ValueError("ragEngine must be specified via autoindexer CRD")
             
             # Update data source configuration from CRD
-            if crd_config.get("dataSource"):
-                ds_config = crd_config["dataSource"]
+            if crd_spec.get("dataSource"):
+                ds_config = crd_spec["dataSource"]
                 
                 # Override data source type if not set via environment
                 if ds_config.get("type"):
@@ -169,6 +171,7 @@ class AutoIndexerJob:
                 # Add specific data source configurations based on type
                 if ds_config.get("git") and ds_config["type"] == "Git":
                     git_config = ds_config["git"]
+
                     self.datasource_config.update({
                         "autoindexer_name": self.autoindexer_name,
                         "repository": git_config.get("repository"),
@@ -176,7 +179,7 @@ class AutoIndexerJob:
                         "commit": git_config.get("commit"),
                         "paths": git_config.get("paths", []),
                         "excludePaths": git_config.get("excludePaths", []),
-                        "lastIndexedCommit": git_config.get("status", {}).get("lastIndexedCommit", ""),
+                        "lastIndexedCommit": crd_config.get("status", {}).get("lastIndexedCommit", ""),
                     })
                     logger.info("Updated Git data source configuration from CRD")
                 
@@ -222,7 +225,7 @@ class AutoIndexerJob:
             # Get document count
             try:
                 documents_response = self.rag_client.list_documents(self.index_name, metadata_filter={"autoindexer": self.autoindexer_name}, limit=1)
-                document_count = documents_response.get("total", 0)
+                document_count = documents_response.total_items
             except Exception:
                 document_count = 0
             

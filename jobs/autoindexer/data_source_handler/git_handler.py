@@ -30,6 +30,9 @@ from autoindexer.k8s.k8s_client import AutoIndexerK8sClient
 from autoindexer.rag.rag_client import KAITORAGClient
 from autoindexer.rag.utils import get_file_extension_language
 
+from orgecc.filematcher import get_factory, MatcherImplementation
+from orgecc.filematcher.patterns.pattern_kit import DenyPatternSourceImpl
+
 from kaito_rag_engine_client.models import Document
 
 logger = logging.getLogger(__name__)
@@ -69,8 +72,20 @@ class GitDataSourceHandler(DataSourceHandler):
         self.commit = self.config.get("commit")
         self.paths = self.config.get("paths", [])
         self.exclude_paths = self.config.get("excludePaths", [])
+        self.exclude_matcher = None
+        self.include_matcher = None
         self.last_indexed_commit = self.config.get("lastIndexedCommit", "")
         
+        factory = get_factory(MatcherImplementation.PURE_PYTHON)
+        if self.exclude_paths:
+            exclude_patterns = DenyPatternSourceImpl(patterns=self.exclude_paths)
+            self.exclude_matcher = factory.pattern2matcher(exclude_patterns)
+        
+        if self.paths:
+            # Must use deny patterns but it works for inclusion as well
+            include_patterns = DenyPatternSourceImpl(patterns=self.paths)
+            self.include_matcher = factory.pattern2matcher(include_patterns)
+
         # File extensions we support for indexing
         self.supported_extensions = {
             '.py', '.go', '.js', '.ts', '.java', '.cpp', '.c', '.h', '.hpp',
@@ -84,6 +99,7 @@ class GitDataSourceHandler(DataSourceHandler):
         self.repo = None
         self.errors = []
         self.total_time = None
+        self.current_commit_hash = None
 
         logger.info(f"Initialized git data source handler for repository: {self.repository}")
 
@@ -167,6 +183,12 @@ class GitDataSourceHandler(DataSourceHandler):
                     logger.info(f"Checked out commit: {self.commit}")
                 except git.exc.GitCommandError as e:
                     raise DataSourceError(f"Failed to checkout commit {self.commit}: {e}")
+            
+            self.repo.remotes.origin.fetch()
+            self.repo.git.pull()
+            # Capture the current commit hash for later use
+            self.current_commit_hash = self.repo.head.commit.hexsha
+            logger.info(f"Current commit hash: {self.current_commit_hash}")
                     
         except git.exc.GitCommandError as e:
             raise DataSourceError(f"Failed to clone repository {self.repository}: {e}")
@@ -181,20 +203,19 @@ class GitDataSourceHandler(DataSourceHandler):
             documents = []
             
             for file_path in files:
-                if self._should_index_file(file_path):
-                    try:
-                        content = self._read_file_content(file_path)
-                        if content:
-                            doc = self._create_document(file_path, content, "commit")
-                            documents.append(doc)
-                            
-                            # Batch index documents
-                            if len(documents) >= 10:
-                                self._index_documents_batch(documents)
-                                documents = []
-                    except Exception as e:
-                        logger.warning(f"Failed to process file {file_path}: {e}")
-                        continue
+                try:
+                    content = self._read_file_content(file_path)
+                    if content:
+                        doc = self._create_document(file_path, content, "commit")
+                        documents.append(doc)
+                        
+                        # Batch index documents
+                        if len(documents) >= 10:
+                            self._index_documents_batch(documents)
+                            documents = []
+                except Exception as e:
+                    logger.warning(f"Failed to process file {file_path}: {e}")
+                    continue
             
             # Index remaining documents
             if documents:
@@ -210,20 +231,19 @@ class GitDataSourceHandler(DataSourceHandler):
             documents = []
             
             for file_path in files:
-                if self._should_index_file(file_path):
-                    try:
-                        content = self._read_file_content(file_path)
-                        if content:
-                            doc = self._create_document(file_path, content, "full")
-                            documents.append(doc)
-                            
-                            # Batch index documents
-                            if len(documents) >= 10:
-                                self._index_documents_batch(documents)
-                                documents = []
-                    except Exception as e:
-                        logger.warning(f"Failed to process file {file_path}: {e}")
-                        continue
+                try:
+                    content = self._read_file_content(file_path)
+                    if content:
+                        doc = self._create_document(file_path, content, "full")
+                        documents.append(doc)
+                        
+                        # Batch index documents
+                        if len(documents) >= 10:
+                            self._index_documents_batch(documents)
+                            documents = []
+                except Exception as e:
+                    logger.warning(f"Failed to process file {file_path}: {e}")
+                    continue
             
             # Index remaining documents
             if documents:
@@ -301,44 +321,37 @@ class GitDataSourceHandler(DataSourceHandler):
         """Get all files in the repository."""
         files = []
         
-        # If specific paths are configured, only process those
-        if self.paths:
-            for path in self.paths:
-                full_path = os.path.join(self.work_dir, path)
-                if os.path.isfile(full_path):
-                    files.append(path)
-                elif os.path.isdir(full_path):
-                    for root, _, filenames in os.walk(full_path):
-                        for filename in filenames:
-                            rel_path = os.path.relpath(os.path.join(root, filename), self.work_dir)
-                            files.append(rel_path)
-        else:
-            # Process all files in repository
-            for root, _, filenames in os.walk(self.work_dir):
-                # Skip .git directory
-                if '.git' in root:
-                    continue
-                for filename in filenames:
-                    rel_path = os.path.relpath(os.path.join(root, filename), self.work_dir)
+        for root, _, filenames in os.walk(self.work_dir):
+            # Skip .git directory
+            if '.git' in root:
+                continue
+            for filename in filenames:
+                rel_path = os.path.relpath(os.path.join(root, filename), self.work_dir)
+                if self._should_index_file(rel_path):
                     files.append(rel_path)
-        
+        logger.info(f"Found {len(files)} files in repository for indexing")
         return files
 
     def _should_index_file(self, file_path: str) -> bool:
-        """Determine if a file should be indexed."""
-        # Check exclude paths
-        for exclude_path in self.exclude_paths:
-            if file_path.startswith(exclude_path):
-                return False
-        
-        # Check file extension
+        """Determine if a file should be indexed using gitignore-like pattern matching."""
+        # Check file extension first
+        logger.debug(f"Checking if file should be indexed: {file_path}")
         _, ext = os.path.splitext(file_path)
         if ext.lower() not in self.supported_extensions:
             return False
         
-        # Skip hidden files and directories
-        if any(part.startswith('.') for part in Path(file_path).parts):
-            return False
+        if not self.paths and not self.exclude_paths:
+            return True
+        
+        if self.exclude_paths and self.exclude_matcher:
+            res = self.exclude_matcher.match(file_path)
+            if res.matches:
+                return False
+        
+        if self.paths and self.include_matcher:
+            res = self.include_matcher.match(file_path)
+            if res.matches:
+                return False
         
         return True
 
@@ -460,18 +473,21 @@ class GitDataSourceHandler(DataSourceHandler):
             "conditions": current_status.get("conditions", [])
         }
         
-        # Update last indexed commit if we have a repository
-        if self.repo:
-            status_update["lastIndexedCommit"] = self.repo.head.commit.hexsha
-        
+        try:
+            # Update last indexed commit if we have captured the commit hash
+            if self.current_commit_hash:
+                status_update["lastIndexedCommit"] = self.current_commit_hash
+        except Exception as e:
+            logger.error(f"Failed to get last indexed commit: {e}")
+
         try:
             list_docs_resp = self.rag_client.list_documents(
                 self.index_name, 
-                metadata_filter={"autoindexer": self.autoindexer_name}, 
+                metadata_filter={"autoindexer":self.autoindexer_name},
                 limit=1
             )
             logger.info(f"Document list response: {list_docs_resp}")
-            status_update["numOfDocumentInIndex"] = list_docs_resp["total_items"]
+            status_update["numOfDocumentInIndex"] = list_docs_resp.total_items
         except Exception as e:
             logger.error(f"Failed to list documents: {e}")
 
