@@ -85,14 +85,6 @@ class GitDataSourceHandler(DataSourceHandler):
             # Must use deny patterns but it works for inclusion as well
             include_patterns = DenyPatternSourceImpl(patterns=self.paths)
             self.include_matcher = factory.pattern2matcher(include_patterns)
-
-        # File extensions we support for indexing
-        self.supported_extensions = {
-            '.py', '.go', '.js', '.ts', '.java', '.cpp', '.c', '.h', '.hpp',
-            '.md', '.txt', '.rst', '.yaml', '.yml', '.json', '.toml', '.xml',
-            '.html', '.css', '.sql', '.sh', '.bash', '.dockerfile', '.rs',
-            '.rb', '.php', '.scala', '.kt', '.cs', '.swift'
-        }
         
         # Working directory for repository operations
         self.work_dir = None
@@ -335,11 +327,7 @@ class GitDataSourceHandler(DataSourceHandler):
     def _should_index_file(self, file_path: str) -> bool:
         """Determine if a file should be indexed using gitignore-like pattern matching."""
         # Check file extension first
-        logger.debug(f"Checking if file should be indexed: {file_path}")
-        _, ext = os.path.splitext(file_path)
-        if ext.lower() not in self.supported_extensions:
-            return False
-        
+        logger.debug(f"Checking if file should be indexed: {file_path}")        
         if not self.paths and not self.exclude_paths:
             return True
         
