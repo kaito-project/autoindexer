@@ -193,13 +193,13 @@ class TestGitDataSourceHandler:
             autoindexer_client=mock_autoindexer_client
         )
         
-        with patch.object(handler, '_index_commit_files') as mock_index_commit:
+        with patch.object(handler, '_index_all_files') as mock_index_all:
             # Mock os.path.exists to return True for cleanup
             with patch('os.path.exists', return_value=True):
                 errors = handler.update_index()
             
             assert errors == []
-            mock_index_commit.assert_called_once()
+            mock_index_all.assert_called_once()
             mock_clone.assert_called_once()
             mock_rmtree.assert_called_once_with(test_work_dir)
 

@@ -98,7 +98,7 @@ class TestAutoIndexerK8sClient:
         }):
             client = AutoIndexerK8sClient()
             
-            assert client.api_group == "kaito.sh"
+            assert client.api_group == "autoindexer.kaito.sh"
             assert client.api_version == "v1alpha1"
             assert client.plural == "autoindexers"
             assert client.kind == "AutoIndexer"
@@ -174,7 +174,7 @@ class TestAutoIndexerK8sClient:
             
             assert result == sample_autoindexer_crd
             mock_custom_api.get_namespaced_custom_object.assert_called_once_with(
-                group="autoindexerkaito.sh",
+                group="autoindexer.kaito.sh",
                 version="v1alpha1",
                 namespace="default",
                 plural="autoindexers",

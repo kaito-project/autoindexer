@@ -117,7 +117,7 @@ class GitDataSourceHandler(DataSourceHandler):
             if self.commit:
                 # Specific commit requested - index all files at that commit
                 logger.info(f"Indexing specific commit: {self.commit}")
-                self._index_commit_files()
+                self._index_all_files()
             elif self.last_indexed_commit:
                 # Incremental indexing - process diff since last indexed commit
                 logger.info(f"Incremental indexing since commit: {self.last_indexed_commit}")
@@ -186,35 +186,6 @@ class GitDataSourceHandler(DataSourceHandler):
             raise DataSourceError(f"Failed to clone repository {self.repository}: {e}")
         except Exception as e:
             raise DataSourceError(f"Repository setup failed: {e}")
-
-    def _index_commit_files(self):
-        """Index all files at the specified commit."""
-        try:
-            # Get all files in the repository at this commit
-            files = self._get_repository_files()
-            documents = []
-            
-            for file_path in files:
-                try:
-                    content = self._read_file_content(file_path)
-                    if content:
-                        doc = self._create_document(file_path, content, "commit")
-                        documents.append(doc)
-                        
-                        # Batch index documents
-                        if len(documents) >= 10:
-                            self._index_documents_batch(documents)
-                            documents = []
-                except Exception as e:
-                    logger.warning(f"Failed to process file {file_path}: {e}")
-                    continue
-            
-            # Index remaining documents
-            if documents:
-                self._index_documents_batch(documents)
-                
-        except Exception as e:
-            raise DataSourceError(f"Failed to index commit files: {e}")
 
     def _index_all_files(self):
         """Index all files in the repository (full indexing)."""
@@ -327,7 +298,18 @@ class GitDataSourceHandler(DataSourceHandler):
     def _should_index_file(self, file_path: str) -> bool:
         """Determine if a file should be indexed using gitignore-like pattern matching."""
         # Check file extension first
-        logger.debug(f"Checking if file should be indexed: {file_path}")        
+        logger.debug(f"Checking if file should be indexed: {file_path}")
+        
+        # Skip hidden files and directories (starting with '.')
+        if any(part.startswith('.') for part in file_path.split('/')):
+            return False
+        
+        # Skip common binary file extensions
+        binary_extensions = {'.exe', '.so', '.dll', '.bin', '.obj', '.o', '.a', '.lib', '.dylib'}
+        _, ext = os.path.splitext(file_path)
+        if ext.lower() in binary_extensions:
+            return False
+        
         if not self.paths and not self.exclude_paths:
             return True
         
@@ -339,6 +321,8 @@ class GitDataSourceHandler(DataSourceHandler):
         if self.paths and self.include_matcher:
             res = self.include_matcher.match(file_path)
             if res.matches:
+                return True
+            else:
                 return False
         
         return True
@@ -460,13 +444,9 @@ class GitDataSourceHandler(DataSourceHandler):
             "numOfDocumentInIndex": 0,
             "conditions": current_status.get("conditions", [])
         }
-        
-        try:
-            # Update last indexed commit if we have captured the commit hash
-            if self.current_commit_hash:
-                status_update["lastIndexedCommit"] = self.current_commit_hash
-        except Exception as e:
-            logger.error(f"Failed to get last indexed commit: {e}")
+
+        if self.current_commit_hash:
+            status_update["lastIndexedCommit"] = self.current_commit_hash
 
         try:
             list_docs_resp = self.rag_client.list_documents(
