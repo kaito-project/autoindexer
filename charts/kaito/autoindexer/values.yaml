@@ -31,5 +31,5 @@ nodeSelector: {}
 tolerations: []
 affinity: {}
 presetAutoIndexerRegistryName: "mcr.microsoft.com/aks/kaito/"
-presetAutoIndexerImageName: "autoindexer-service"
+presetAutoIndexerImageName: "autoindexer-job"
 presetAutoIndexerImageTag: 0.0.1

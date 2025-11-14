@@ -35,7 +35,7 @@ class AutoIndexerK8sClient:
 
     def __init__(self):
         """Initialize the Kubernetes client."""
-        self.api_group = "kaito.sh"
+        self.api_group = "autoindexer.kaito.sh"
         self.api_version = "v1alpha1"
         self.plural = "autoindexers"
         self.kind = "AutoIndexer"

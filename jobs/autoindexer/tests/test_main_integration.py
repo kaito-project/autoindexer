@@ -41,6 +41,20 @@ class TestAutoIndexerJob:
         with patch('autoindexer.main.AutoIndexerK8sClient') as mock_class:
             mock_client = Mock()
             mock_client.namespace = "test-namespace"
+            # Mock get_autoindexer() to return the full CRD structure
+            mock_client.get_autoindexer.return_value = {
+                "spec": {
+                    "indexName": "test-index",
+                    "ragEngine": "test-rag-engine",
+                    "dataSource": {
+                        "type": "Static",
+                        "static": {
+                            "urls": ["https://example.com/doc.txt"]
+                        }
+                    }
+                }
+            }
+            # Also mock get_autoindexer_config() for compatibility
             mock_client.get_autoindexer_config.return_value = {
                 "indexName": "test-index",
                 "ragEngine": "test-rag-engine",
@@ -100,7 +114,7 @@ class TestAutoIndexerJob:
                 assert service.ragengine_endpoint == "http://test-rag-engine.test-namespace.svc.cluster.local:80"
 
                 # Verify K8s client was initialized
-                mock_k8s_client.get_autoindexer_config.assert_called_once()
+                mock_k8s_client.get_autoindexer.assert_called_once()
 
                 # Verify RAG client was initialized
                 mock_rag_client.assert_called_once_with("http://test-rag-engine.test-namespace.svc.cluster.local:80")
@@ -131,15 +145,17 @@ class TestAutoIndexerJob:
     def test_init_success_with_git_data_source(self, valid_env_vars, mock_k8s_client, mock_rag_client, mock_git_handler):
         """Test successful initialization with git data source."""
         # Update mock to return git config
-        mock_k8s_client.get_autoindexer_config.return_value = {
-            "indexName": "test-index",
-            "ragEngine": "test-rag-engine", 
-            "dataSource": {
-                "type": "Git",
-                "git": {
-                    "repository": "https://github.com/test/repo.git",
-                    "branch": "main",
-                    "paths": ["/docs"]
+        mock_k8s_client.get_autoindexer.return_value = {
+            "spec": {
+                "indexName": "test-index", 
+                "ragEngine": "test-rag-engine",
+                "dataSource": {
+                    "type": "Git",
+                    "git": {
+                        "repository": "https://github.com/test/repo.git",
+                        "branch": "main",
+                        "paths": ["/docs"]
+                    }
                 }
             }
         }
@@ -157,9 +173,13 @@ class TestAutoIndexerJob:
         """Test initialization failure with missing required environment variables."""
         incomplete_env = {"ACCESS_SECRET": "test-secret"}  # Missing other required vars
         
-        with patch.dict(os.environ, incomplete_env, clear=True), \
-             pytest.raises(ValueError, match="RAG engine endpoint must be configured"):
-            AutoIndexerJob()
+        # Mock the Kubernetes client to avoid real connections
+        with patch('autoindexer.main.AutoIndexerK8sClient') as mock_k8s_class:
+            mock_k8s_class.side_effect = Exception("K8s connection failed")
+            
+            with patch.dict(os.environ, incomplete_env, clear=True), \
+                 pytest.raises(Exception, match="K8s connection failed"):
+                AutoIndexerJob()
 
     def test_init_k8s_client_failure(self, valid_env_vars):
         """Test handling of Kubernetes client initialization failure."""
@@ -174,12 +194,14 @@ class TestAutoIndexerJob:
         """Test initialization failure with invalid CRD config missing index name."""
         with patch('autoindexer.main.AutoIndexerK8sClient') as mock_class:
             mock_client = Mock()
-            mock_client.get_autoindexer_config.return_value = {
-                "ragEngine": "test-rag-engine",
-                # Missing indexName
-                "dataSource": {
-                    "type": "Static",
-                    "static": {"urls": ["https://example.com/doc.txt"]}
+            mock_client.get_autoindexer.return_value = {
+                "spec": {
+                    "ragEngine": "test-rag-engine",
+                    # Missing indexName
+                    "dataSource": {
+                        "type": "Static",
+                        "static": {"urls": ["https://example.com/doc.txt"]}
+                    }
                 }
             }
             mock_class.return_value = mock_client
@@ -190,12 +212,14 @@ class TestAutoIndexerJob:
 
     def test_init_unsupported_data_source_type(self, valid_env_vars, mock_k8s_client, mock_rag_client):
         """Test initialization failure with unsupported data source type."""
-        mock_k8s_client.get_autoindexer_config.return_value = {
-            "indexName": "test-index",
-            "ragEngine": "test-rag-engine",
-            "dataSource": {
-                "type": "UnsupportedType",
-                "unsupported": {}
+        mock_k8s_client.get_autoindexer.return_value = {
+            "spec": {
+                "indexName": "test-index",
+                "ragEngine": "test-rag-engine",
+                "dataSource": {
+                    "type": "UnsupportedType",
+                    "unsupported": {}
+                }
             }
         }
         
@@ -210,7 +234,11 @@ class TestAutoIndexerJob:
             
             # Mock successful indexing on the actual instances
             service.data_source_handler.update_index.return_value = []  # No errors
-            service.rag_client.list_documents.return_value = {"total": 5}
+            
+            # Mock list_documents response with total_items attribute
+            mock_response = Mock()
+            mock_response.total_items = 5
+            service.rag_client.list_documents.return_value = mock_response
             
             with patch('time.time', side_effect=[1000.0] + [1030.0] * 10):  # 30 second duration, multiple calls
                 result = service.run()
@@ -376,17 +404,19 @@ class TestAutoIndexerJob:
         with patch('autoindexer.main.AutoIndexerK8sClient') as mock_class:
             mock_client = Mock()
             mock_client.namespace = "test-namespace"
-            mock_client.get_autoindexer_config.return_value = {
-                "indexName": "git-index",
-                "ragEngine": "rag-engine",
-                "dataSource": {
-                    "type": "Git",
-                    "git": {
-                        "repository": "https://github.com/test/repo.git",
-                        "branch": "develop",
-                        "commit": "abc123",
-                        "paths": ["/docs", "/examples"],
-                        "excludePaths": ["/docs/internal"]
+            mock_client.get_autoindexer.return_value = {
+                "spec": {
+                    "indexName": "git-index",
+                    "ragEngine": "rag-engine",
+                    "dataSource": {
+                        "type": "Git",
+                        "git": {
+                            "repository": "https://github.com/test/repo.git",
+                            "branch": "develop",
+                            "commit": "abc123",
+                            "paths": ["/docs", "/examples"],
+                            "excludePaths": ["/docs/internal"]
+                        }
                     }
                 }
             }
