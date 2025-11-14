@@ -36,6 +36,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	autoindexerv1alpha1 "github.com/kaito-project/autoindexer/api/v1alpha1"
+	"github.com/kaito-project/autoindexer/pkg/autoindexer/driftdetection"
 	"github.com/kaito-project/autoindexer/pkg/autoindexer/manifests"
 	kaitov1alpha1 "github.com/kaito-project/kaito/api/v1alpha1"
 )
@@ -48,19 +49,60 @@ const (
 // AutoIndexerReconciler reconciles an AutoIndexer object
 type AutoIndexerReconciler struct {
 	client.Client
-	Log      logr.Logger
-	Scheme   *runtime.Scheme
-	Recorder record.EventRecorder
+	Log             logr.Logger
+	Scheme          *runtime.Scheme
+	Recorder        record.EventRecorder
+	DriftDetector   driftdetection.DriftDetector
+	DriftReconciler *driftdetection.DriftReconciler
 }
 
 // NewAutoIndexerReconciler creates a new AutoIndexer reconciler
 func NewAutoIndexerReconciler(client client.Client, scheme *runtime.Scheme, log logr.Logger, recorder record.EventRecorder) *AutoIndexerReconciler {
-	return &AutoIndexerReconciler{
-		Client:   client,
-		Scheme:   scheme,
-		Log:      log,
-		Recorder: recorder,
+	// Create drift reconciler
+	driftReconciler := driftdetection.NewDriftReconciler(client, log.WithName("drift-reconciler"))
+	
+	// Create drift detector
+	ragClient := driftdetection.NewRAGEngineClient(30*time.Second, 3)
+	
+	// Configure drift detection
+	driftConfig := driftdetection.DefaultDriftDetectionConfig()
+	
+	// Allow configuration via environment variables
+	if intervalEnv := os.Getenv("DRIFT_DETECTION_INTERVAL"); intervalEnv != "" {
+		if interval, err := time.ParseDuration(intervalEnv); err == nil {
+			driftConfig.CheckInterval = interval
+		}
 	}
+	
+	if enabledEnv := os.Getenv("DRIFT_DETECTION_ENABLED"); enabledEnv == "false" {
+		driftConfig.Enabled = false
+	}
+	
+	reconciler := &AutoIndexerReconciler{
+		Client:          client,
+		Scheme:          scheme,
+		Log:             log,
+		Recorder:        recorder,
+		DriftReconciler: driftReconciler,
+	}
+	
+	// Create drift detector with reconciler callback
+	driftDetector := driftdetection.NewDriftDetector(
+		client,
+		ragClient,
+		driftConfig,
+		log.WithName("drift-detector"),
+		reconciler.handleDriftResult,
+	)
+	
+	reconciler.DriftDetector = driftDetector
+	
+	return reconciler
+}
+
+// handleDriftResult handles drift detection results
+func (r *AutoIndexerReconciler) handleDriftResult(result driftdetection.DriftDetectionResult) error {
+	return r.DriftReconciler.ReconcileDrift(result)
 }
 
 //+kubebuilder:rbac:groups=autoindexer.kaito.sh,resources=autoindexers,verbs=get;list;watch;update;patch
@@ -434,6 +476,14 @@ func (r *AutoIndexerReconciler) updateStatusConditionIfNotMatch(ctx context.Cont
 func (r *AutoIndexerReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	r.Recorder = mgr.GetEventRecorderFor("AutoIndexer")
 
+	// Add a hook to start drift detection when the manager starts
+	if err := mgr.Add(&driftDetectorRunnable{
+		driftDetector: r.DriftDetector,
+		logger:        r.Log.WithName("drift-detector-runnable"),
+	}); err != nil {
+		return fmt.Errorf("failed to add drift detector runnable: %w", err)
+	}
+
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&autoindexerv1alpha1.AutoIndexer{}).
 		Owns(&batchv1.Job{}).
@@ -443,6 +493,17 @@ func (r *AutoIndexerReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Owns(&rbacv1.RoleBinding{}).
 		WithOptions(controller.Options{MaxConcurrentReconciles: 5}).
 		Complete(r)
+}
+
+// driftDetectorRunnable implements manager.Runnable to start drift detection
+type driftDetectorRunnable struct {
+	driftDetector driftdetection.DriftDetector
+	logger        logr.Logger
+}
+
+func (d *driftDetectorRunnable) Start(ctx context.Context) error {
+	d.logger.Info("Starting drift detector")
+	return d.driftDetector.Start(ctx.Done())
 }
 
 // equalCronJobs compares two CronJob specs for equality
