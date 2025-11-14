@@ -13,14 +13,9 @@
 
 
 from abc import ABC, abstractmethod
+from datetime import UTC, datetime
 
-
-import chardet
-import contextlib
-import io
 import logging
-import os
-import json
 
 from autoindexer.k8s.k8s_client import AutoIndexerK8sClient
 from autoindexer.rag.rag_client import KAITORAGClient
@@ -51,3 +46,75 @@ class DataSourceHandler(ABC):
         Update the AutoIndexer CRD status based on the current index state and indexing status.
         """
         pass
+
+    def _create_base_autoindexer_status_update(self,
+            index_name: str,
+            autoindexer_name: str,
+            rag_client: KAITORAGClient,
+            autoindexer_client: AutoIndexerK8sClient,
+            errors: list,
+            indexing_duration_seconds: int) -> dict:
+        """
+        Create the base structure for the AutoIndexer status.
+
+        Returns:
+            dict: Base status dictionary
+        """
+        current_ai = autoindexer_client.get_autoindexer()
+        current_status = current_ai["status"]
+
+        status_update = {
+            "lastIndexingTimestamp": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+            "lastIndexingDurationSeconds": indexing_duration_seconds,
+            "indexingPhase": "Completed",
+            "successfulIndexingCount": current_status.get("successfulIndexingCount", 0) + 1,
+            "numOfDocumentInIndex": 0,
+            "conditions": current_status.get("conditions", [])
+        }
+
+        try:
+            list_docs_resp = rag_client.list_documents(
+                index_name, 
+                metadata_filter={"autoindexer":autoindexer_name},
+                limit=1
+            )
+            logger.info(f"Document list response: {list_docs_resp}")
+            status_update["numOfDocumentInIndex"] = list_docs_resp.total_items
+        except Exception as e:
+            logger.error(f"Failed to list documents: {e}")
+        
+        # Create conditions
+        conditions = {}
+        conditions["AutoIndexerSucceeded"] = autoindexer_client._create_condition(
+            "AutoIndexerSucceeded", "True", "IndexingCompleted", "Indexing completed successfully"
+        )
+        
+        if errors:
+            conditions["AutoIndexerError"] = autoindexer_client._create_condition(
+                "AutoIndexerError", "True", "IndexingErrors", f"Indexing completed with errors: {errors}"
+            )
+        else:
+            conditions["AutoIndexerError"] = autoindexer_client._create_condition(
+                "AutoIndexerError", "False", "IndexingCompleted", "No errors during indexing"
+            )
+            
+        conditions["AutoIndexerFailed"] = autoindexer_client._create_condition(
+            "AutoIndexerFailed", "False", "IndexingCompleted", "Indexing completed successfully"
+        )
+        conditions["AutoIndexerIndexing"] = autoindexer_client._create_condition(
+            "AutoIndexerIndexing", "False", "IndexingCompleted", "Document indexing process completed successfully"
+        )
+
+        # Update conditions
+        for condition_type, condition_data in conditions.items():
+            found = False
+            for i, existing_condition in enumerate(status_update["conditions"]):
+                if existing_condition.get("type") == condition_type:
+                    status_update["conditions"][i] = condition_data
+                    found = True
+                    break
+            
+            if not found:
+                status_update["conditions"].append(condition_data)
+
+        return status_update

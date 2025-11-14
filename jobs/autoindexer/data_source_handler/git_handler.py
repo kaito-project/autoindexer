@@ -433,65 +433,18 @@ class GitDataSourceHandler(DataSourceHandler):
         """
         Update the AutoIndexer CRD status based on the current index state and indexing status.
         """
-        current_ai = self.autoindexer_client.get_autoindexer()
-        current_status = current_ai["status"]
 
-        status_update = {
-            "lastIndexingTimestamp": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
-            "lastIndexingDurationSeconds": self.total_time.seconds if self.total_time else 0,
-            "indexingPhase": "Completed",
-            "successfulIndexingCount": current_status.get("successfulIndexingCount", 0) + 1,
-            "numOfDocumentInIndex": 0,
-            "conditions": current_status.get("conditions", [])
-        }
+        status_update = self._create_base_autoindexer_status_update(
+            index_name=self.index_name,
+            autoindexer_name=self.autoindexer_name,
+            rag_client=self.rag_client,
+            autoindexer_client=self.autoindexer_client,
+            errors=self.errors,
+            indexing_duration_seconds=self.total_time.seconds if self.total_time else 0
+        )
 
         if self.current_commit_hash:
             status_update["lastIndexedCommit"] = self.current_commit_hash
-
-        try:
-            list_docs_resp = self.rag_client.list_documents(
-                self.index_name, 
-                metadata_filter={"autoindexer":self.autoindexer_name},
-                limit=1
-            )
-            logger.info(f"Document list response: {list_docs_resp}")
-            status_update["numOfDocumentInIndex"] = list_docs_resp.total_items
-        except Exception as e:
-            logger.error(f"Failed to list documents: {e}")
-
-        # Create conditions
-        conditions = {}
-        conditions["AutoIndexerSucceeded"] = self.autoindexer_client._create_condition(
-            "AutoIndexerSucceeded", "True", "IndexingCompleted", "Git indexing completed successfully"
-        )
-        
-        if self.errors:
-            conditions["AutoIndexerError"] = self.autoindexer_client._create_condition(
-                "AutoIndexerError", "True", "IndexingErrors", f"Git indexing completed with errors: {self.errors}"
-            )
-        else:
-            conditions["AutoIndexerError"] = self.autoindexer_client._create_condition(
-                "AutoIndexerError", "False", "IndexingCompleted", "No errors during Git indexing"
-            )
-            
-        conditions["AutoIndexerFailed"] = self.autoindexer_client._create_condition(
-            "AutoIndexerFailed", "False", "IndexingCompleted", "Git indexing completed successfully"
-        )
-        conditions["AutoIndexerIndexing"] = self.autoindexer_client._create_condition(
-            "AutoIndexerIndexing", "False", "IndexingCompleted", "Git document indexing process completed successfully"
-        )
-
-        # Update conditions
-        for condition_type, condition_data in conditions.items():
-            found = False
-            for i, existing_condition in enumerate(status_update["conditions"]):
-                if existing_condition.get("type") == condition_type:
-                    status_update["conditions"][i] = condition_data
-                    found = True
-                    break
-            
-            if not found:
-                status_update["conditions"].append(condition_data)
 
         if not self.autoindexer_client.update_autoindexer_status(status_update, update_success_or_failure=True):
             logger.error("Failed to update AutoIndexer status")
