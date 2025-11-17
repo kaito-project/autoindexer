@@ -71,6 +71,40 @@ func (r *DriftReconciler) triggerJob(ctx context.Context, result DriftDetectionR
 		return fmt.Errorf("failed to get AutoIndexer: %w", err)
 	}
 
+	// For scheduled AutoIndexers, suspend them during drift remediation
+	var originalSuspendState bool
+	if autoIndexer.Spec.Schedule != nil {
+		// Store original suspend state
+		if autoIndexer.Spec.Suspend != nil {
+			originalSuspendState = *autoIndexer.Spec.Suspend
+		} else {
+			originalSuspendState = false
+		}
+
+		// Only suspend if not already suspended
+		if !originalSuspendState {
+			suspend := true
+			autoIndexer.Spec.Suspend = &suspend
+
+			// Add annotation to track the original state and that we need to unsuspend after remediation
+			if autoIndexer.Annotations == nil {
+				autoIndexer.Annotations = make(map[string]string)
+			}
+			autoIndexer.Annotations["autoindexer.kaito.io/drift-remediation-suspended"] = "true"
+			autoIndexer.Annotations["autoindexer.kaito.io/original-suspend-state"] = fmt.Sprintf("%t", originalSuspendState)
+
+			// Update the AutoIndexer to suspend it
+			if err := r.client.Update(ctx, autoIndexer); err != nil {
+				return fmt.Errorf("failed to suspend AutoIndexer during drift remediation: %w", err)
+			}
+
+			r.logger.Info("Suspended AutoIndexer for drift remediation",
+				"autoindexer", result.AutoIndexerName,
+				"namespace", result.AutoIndexerNamespace,
+				"original-suspend-state", originalSuspendState)
+		}
+	}
+
 	// Generate a unique job name with timestamp
 	timestamp := time.Now().Format("20060102-150405")
 	jobName := fmt.Sprintf("%s-drift-remediation-%s", autoIndexer.Name, timestamp)
@@ -87,6 +121,18 @@ func (r *DriftReconciler) triggerJob(ctx context.Context, result DriftDetectionR
 
 	job := manifests.GenerateIndexingJobManifest(config)
 
+	// Add drift remediation specific labels
+	if job.Labels == nil {
+		job.Labels = make(map[string]string)
+	}
+	job.Labels["autoindexer.kaito.io/drift-remediation"] = "true"
+
+	// Add the same labels to the pod template
+	if job.Spec.Template.Labels == nil {
+		job.Spec.Template.Labels = make(map[string]string)
+	}
+	job.Spec.Template.Labels["autoindexer.kaito.io/drift-remediation"] = "true"
+
 	// Set the AutoIndexer as the owner of the Job
 	if err := controllerutil.SetControllerReference(autoIndexer, job, r.client.Scheme()); err != nil {
 		return fmt.Errorf("failed to set controller reference: %w", err)
@@ -97,15 +143,22 @@ func (r *DriftReconciler) triggerJob(ctx context.Context, result DriftDetectionR
 		return fmt.Errorf("failed to create drift remediation job: %w", err)
 	}
 
-	r.logger.Info("Created drift remediation job", 
-		"job", jobName, 
-		"autoindexer", result.AutoIndexerName, 
+	r.logger.Info("Created drift remediation job",
+		"job", jobName,
+		"autoindexer", result.AutoIndexerName,
 		"namespace", result.AutoIndexerNamespace,
 		"expected-count", result.ExpectedCount,
 		"actual-count", result.ActualCount)
 
-	// Update the AutoIndexer status to indicate drift remediation
-	return r.updateStatusWithDriftRemediation(ctx, autoIndexer, result)
+	// Update the AutoIndexer status to indicate drift remediation (best effort)
+	if err := r.updateStatusWithDriftRemediation(ctx, autoIndexer, result); err != nil {
+		r.logger.Error(err, "failed to update AutoIndexer status for drift remediation, but job creation succeeded",
+			"autoindexer", result.AutoIndexerName,
+			"namespace", result.AutoIndexerNamespace)
+		// Don't fail the whole operation if only the status update fails
+	}
+
+	return nil
 }
 
 // updateStatus updates the AutoIndexer status to reflect detected drift
@@ -130,8 +183,8 @@ func (r *DriftReconciler) updateStatus(ctx context.Context, result DriftDetectio
 		return fmt.Errorf("failed to update AutoIndexer status: %w", err)
 	}
 
-	r.logger.Info("Updated AutoIndexer status with drift information", 
-		"autoindexer", result.AutoIndexerName, 
+	r.logger.Info("Updated AutoIndexer status with drift information",
+		"autoindexer", result.AutoIndexerName,
 		"namespace", result.AutoIndexerNamespace,
 		"expected-count", result.ExpectedCount,
 		"actual-count", result.ActualCount)
@@ -141,14 +194,23 @@ func (r *DriftReconciler) updateStatus(ctx context.Context, result DriftDetectio
 
 // updateStatusWithDriftRemediation updates the status for drift remediation jobs
 func (r *DriftReconciler) updateStatusWithDriftRemediation(ctx context.Context, autoIndexer *autoindexerv1alpha1.AutoIndexer, result DriftDetectionResult) error {
+	// Refetch the AutoIndexer to get the latest version after spec updates
+	freshAutoIndexer := &autoindexerv1alpha1.AutoIndexer{}
+	if err := r.client.Get(ctx, types.NamespacedName{
+		Name:      result.AutoIndexerName,
+		Namespace: result.AutoIndexerNamespace,
+	}, freshAutoIndexer); err != nil {
+		return fmt.Errorf("failed to get fresh AutoIndexer for status update: %w", err)
+	}
+
 	// Update indexing phase to indicate drift remediation
-	autoIndexer.Status.IndexingPhase = autoindexerv1alpha1.AutoIndexerPhaseRunning
+	freshAutoIndexer.Status.IndexingPhase = autoindexerv1alpha1.AutoIndexerPhaseRunning
 
 	// Add drift remediation condition
-	r.addDriftRemediationCondition(autoIndexer, result)
+	r.addDriftRemediationCondition(freshAutoIndexer, result)
 
 	// Update the status
-	if err := r.client.Status().Update(ctx, autoIndexer); err != nil {
+	if err := r.client.Status().Update(ctx, freshAutoIndexer); err != nil {
 		return fmt.Errorf("failed to update AutoIndexer status for drift remediation: %w", err)
 	}
 
@@ -162,7 +224,7 @@ func (r *DriftReconciler) updateDriftCondition(autoIndexer *autoindexerv1alpha1.
 		Status:             metav1.ConditionTrue,
 		LastTransitionTime: metav1.Now(),
 		Reason:             "DocumentCountMismatch",
-		Message: fmt.Sprintf("Document count drift detected: expected %d, actual %d", 
+		Message: fmt.Sprintf("Document count drift detected: expected %d, actual %d",
 			result.ExpectedCount, result.ActualCount),
 	}
 
@@ -175,7 +237,7 @@ func (r *DriftReconciler) updateDriftCondition(autoIndexer *autoindexerv1alpha1.
 			break
 		}
 	}
-	
+
 	if !updated {
 		autoIndexer.Status.Conditions = append(autoIndexer.Status.Conditions, condition)
 	}
@@ -188,7 +250,7 @@ func (r *DriftReconciler) addDriftRemediationCondition(autoIndexer *autoindexerv
 		Status:             metav1.ConditionTrue,
 		LastTransitionTime: metav1.Now(),
 		Reason:             "RemediationJobCreated",
-		Message: fmt.Sprintf("Drift remediation job created due to document count mismatch: expected %d, actual %d", 
+		Message: fmt.Sprintf("Drift remediation job created due to document count mismatch: expected %d, actual %d",
 			result.ExpectedCount, result.ActualCount),
 	}
 
@@ -201,7 +263,7 @@ func (r *DriftReconciler) addDriftRemediationCondition(autoIndexer *autoindexerv
 			break
 		}
 	}
-	
+
 	if !updated {
 		autoIndexer.Status.Conditions = append(autoIndexer.Status.Conditions, condition)
 	}

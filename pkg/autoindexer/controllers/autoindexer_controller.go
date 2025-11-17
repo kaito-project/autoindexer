@@ -60,24 +60,24 @@ type AutoIndexerReconciler struct {
 func NewAutoIndexerReconciler(client client.Client, scheme *runtime.Scheme, log logr.Logger, recorder record.EventRecorder) *AutoIndexerReconciler {
 	// Create drift reconciler
 	driftReconciler := driftdetection.NewDriftReconciler(client, log.WithName("drift-reconciler"))
-	
+
 	// Create drift detector
 	ragClient := driftdetection.NewRAGEngineClient(30*time.Second, 3)
-	
+
 	// Configure drift detection
 	driftConfig := driftdetection.DefaultDriftDetectionConfig()
-	
+
 	// Allow configuration via environment variables
 	if intervalEnv := os.Getenv("DRIFT_DETECTION_INTERVAL"); intervalEnv != "" {
 		if interval, err := time.ParseDuration(intervalEnv); err == nil {
 			driftConfig.CheckInterval = interval
 		}
 	}
-	
+
 	if enabledEnv := os.Getenv("DRIFT_DETECTION_ENABLED"); enabledEnv == "false" {
 		driftConfig.Enabled = false
 	}
-	
+
 	reconciler := &AutoIndexerReconciler{
 		Client:          client,
 		Scheme:          scheme,
@@ -85,7 +85,7 @@ func NewAutoIndexerReconciler(client client.Client, scheme *runtime.Scheme, log 
 		Recorder:        recorder,
 		DriftReconciler: driftReconciler,
 	}
-	
+
 	// Create drift detector with reconciler callback
 	driftDetector := driftdetection.NewDriftDetector(
 		client,
@@ -94,9 +94,9 @@ func NewAutoIndexerReconciler(client client.Client, scheme *runtime.Scheme, log 
 		log.WithName("drift-detector"),
 		reconciler.handleDriftResult,
 	)
-	
+
 	reconciler.DriftDetector = driftDetector
-	
+
 	return reconciler
 }
 
@@ -197,6 +197,12 @@ func (r *AutoIndexerReconciler) addAutoIndexer(ctx context.Context, autoIndexerO
 		"autoIndexerResourceStatusSuccess", "autoindexer resources are ready"); err != nil {
 		klog.ErrorS(err, "failed to update autoindexer status", "autoindexer", klog.KObj(autoIndexerObj))
 		// Don't return error here as the main reconciliation succeeded
+	}
+
+	// Check for completed drift remediation jobs and unsuspend if necessary
+	if err := r.handleDriftRemediationJobCompletion(ctx, autoIndexerObj); err != nil {
+		klog.ErrorS(err, "failed to handle drift remediation job completion", "autoindexer", klog.KObj(autoIndexerObj))
+		// Log error but don't fail the reconciliation
 	}
 
 	return ctrl.Result{}, nil
@@ -545,4 +551,87 @@ func hasOwnerReference(obj metav1.Object, owner metav1.Object) bool {
 		}
 	}
 	return false
+}
+
+// handleDriftRemediationJobCompletion checks for completed drift remediation jobs and unsuspends the AutoIndexer if necessary
+func (r *AutoIndexerReconciler) handleDriftRemediationJobCompletion(ctx context.Context, autoIndexerObj *autoindexerv1alpha1.AutoIndexer) error {
+	// Only check if this AutoIndexer was suspended for drift remediation
+	if autoIndexerObj.Annotations["autoindexer.kaito.io/drift-remediation-suspended"] != "true" {
+		return nil
+	}
+
+	// Get all jobs owned by this AutoIndexer that are drift remediation jobs
+	jobs := &batchv1.JobList{}
+	listOpts := []client.ListOption{
+		client.InNamespace(autoIndexerObj.Namespace),
+		client.MatchingLabels{
+			"autoindexer.kaito.io/name":              autoIndexerObj.Name,
+			"autoindexer.kaito.io/drift-remediation": "true",
+		},
+	}
+
+	if err := r.Client.List(ctx, jobs, listOpts...); err != nil {
+		return fmt.Errorf("failed to list drift remediation jobs: %w", err)
+	}
+
+	// Check if any drift remediation jobs are still running
+	hasRunningJobs := false
+	for _, job := range jobs.Items {
+		// Job is still running if it hasn't succeeded or failed
+		if job.Status.Succeeded == 0 && job.Status.Failed == 0 {
+			hasRunningJobs = true
+			break
+		}
+	}
+
+	// If no drift remediation jobs are running, we can unsuspend the AutoIndexer
+	if !hasRunningJobs && len(jobs.Items) > 0 {
+		return r.unsuspendAfterDriftRemediation(ctx, autoIndexerObj)
+	}
+
+	return nil
+}
+
+// unsuspendAfterDriftRemediation restores the original suspension state after drift remediation completes
+func (r *AutoIndexerReconciler) unsuspendAfterDriftRemediation(ctx context.Context, autoIndexerObj *autoindexerv1alpha1.AutoIndexer) error {
+	// Get the original suspend state from annotations
+	originalSuspendStateStr := autoIndexerObj.Annotations["autoindexer.kaito.io/original-suspend-state"]
+	if originalSuspendStateStr == "" {
+		// Default to false if annotation is missing
+		originalSuspendStateStr = "false"
+	}
+
+	originalSuspendState := originalSuspendStateStr == "true"
+
+	// Update the suspend state to the original value
+	autoIndexerObj.Spec.Suspend = &originalSuspendState
+
+	// Remove the drift remediation annotations
+	if autoIndexerObj.Annotations != nil {
+		delete(autoIndexerObj.Annotations, "autoindexer.kaito.io/drift-remediation-suspended")
+		delete(autoIndexerObj.Annotations, "autoindexer.kaito.io/original-suspend-state")
+	}
+
+	// Update the AutoIndexer
+	if err := r.Client.Update(ctx, autoIndexerObj); err != nil {
+		return fmt.Errorf("failed to unsuspend AutoIndexer after drift remediation: %w", err)
+	}
+
+	// Update the drift remediation condition to indicate completion
+	r.setAutoIndexerCondition(autoIndexerObj, "DriftRemediation", metav1.ConditionFalse, "RemediationCompleted", "Drift remediation completed, AutoIndexer resumed")
+
+	// Update status (best effort - don't fail if status update fails)
+	if err := r.Client.Status().Update(ctx, autoIndexerObj); err != nil {
+		r.Log.Error(err, "failed to update AutoIndexer status after drift remediation completion, but unsuspension succeeded",
+			"autoindexer", autoIndexerObj.Name,
+			"namespace", autoIndexerObj.Namespace)
+		// Don't return error since the main operation (unsuspending) succeeded
+	}
+
+	r.Log.Info("Unsuspended AutoIndexer after drift remediation completion",
+		"autoindexer", autoIndexerObj.Name,
+		"namespace", autoIndexerObj.Namespace,
+		"restored-suspend-state", originalSuspendState)
+
+	return nil
 }
