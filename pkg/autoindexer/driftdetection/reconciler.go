@@ -51,8 +51,6 @@ func (r *DriftReconciler) ReconcileDrift(result DriftDetectionResult) error {
 	switch result.Action {
 	case DriftActionTriggerJob:
 		return r.triggerJob(ctx, result)
-	case DriftActionUpdateStatus:
-		return r.updateStatus(ctx, result)
 	case DriftActionNone:
 		return nil
 	default:
@@ -165,38 +163,6 @@ func (r *DriftReconciler) triggerJob(ctx context.Context, result DriftDetectionR
 	return nil
 }
 
-// updateStatus updates the AutoIndexer status to reflect detected drift
-func (r *DriftReconciler) updateStatus(ctx context.Context, result DriftDetectionResult) error {
-	// Get the AutoIndexer object
-	autoIndexer := &autoindexerv1alpha1.AutoIndexer{}
-	if err := r.client.Get(ctx, types.NamespacedName{
-		Name:      result.AutoIndexerName,
-		Namespace: result.AutoIndexerNamespace,
-	}, autoIndexer); err != nil {
-		return fmt.Errorf("failed to get AutoIndexer: %w", err)
-	}
-
-	existingAutoIndexer := autoIndexer.DeepCopy()
-	// Update status to reflect the actual count
-	autoIndexer.Status.NumOfDocumentInIndex = result.ActualCount
-
-	// Add or update drift condition
-	r.updateDriftCondition(autoIndexer, result)
-
-	// Update the status
-	if err := r.client.Status().Patch(ctx, autoIndexer, client.MergeFrom(existingAutoIndexer)); err != nil {
-		return fmt.Errorf("failed to update AutoIndexer status: %w", err)
-	}
-
-	r.logger.Info("Updated AutoIndexer status with drift information",
-		"autoindexer", result.AutoIndexerName,
-		"namespace", result.AutoIndexerNamespace,
-		"expected-count", result.ExpectedCount,
-		"actual-count", result.ActualCount)
-
-	return nil
-}
-
 // updateStatusWithDriftRemediation updates the status for drift remediation jobs
 func (r *DriftReconciler) updateStatusWithDriftRemediation(ctx context.Context, autoIndexer *autoindexerv1alpha1.AutoIndexer, result DriftDetectionResult) error {
 	// Refetch the AutoIndexer to get the latest version after spec updates
@@ -215,6 +181,7 @@ func (r *DriftReconciler) updateStatusWithDriftRemediation(ctx context.Context, 
 
 	// Add drift remediation condition
 	r.addDriftRemediationCondition(freshAutoIndexer, result)
+	r.updateDriftCondition(freshAutoIndexer, result)
 
 	// Update the status
 	if err := r.client.Status().Patch(ctx, freshAutoIndexer, client.MergeFrom(existingFreshAutoIndexer)); err != nil {
@@ -233,6 +200,7 @@ func (r *DriftReconciler) updateDriftCondition(autoIndexer *autoindexerv1alpha1.
 		Reason:             "DocumentCountMismatch",
 		Message: fmt.Sprintf("Document count drift detected: expected %d, actual %d",
 			result.ExpectedCount, result.ActualCount),
+		ObservedGeneration: autoIndexer.Generation,
 	}
 
 	// Find and update existing condition or append new one
@@ -259,6 +227,7 @@ func (r *DriftReconciler) addDriftRemediationCondition(autoIndexer *autoindexerv
 		Reason:             "RemediationJobCreated",
 		Message: fmt.Sprintf("Drift remediation job created due to document count mismatch: expected %d, actual %d",
 			result.ExpectedCount, result.ActualCount),
+		ObservedGeneration: autoIndexer.Generation,
 	}
 
 	// Find and update existing condition or append new one

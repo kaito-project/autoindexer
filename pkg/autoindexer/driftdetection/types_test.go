@@ -22,7 +22,7 @@ import (
 
 func TestDefaultDriftDetectionConfig(t *testing.T) {
 	config := DefaultDriftDetectionConfig()
-	
+
 	assert.Equal(t, 5*time.Minute, config.CheckInterval)
 	assert.True(t, config.Enabled)
 	assert.Equal(t, 3, config.MaxRetries)
@@ -39,7 +39,7 @@ func TestDriftDetectionResult(t *testing.T) {
 		Action:               DriftActionTriggerJob,
 		Error:                nil,
 	}
-	
+
 	assert.Equal(t, "test-autoindexer", result.AutoIndexerName)
 	assert.Equal(t, "test-namespace", result.AutoIndexerNamespace)
 	assert.Equal(t, int32(10), result.ExpectedCount)
@@ -51,6 +51,5 @@ func TestDriftDetectionResult(t *testing.T) {
 
 func TestDriftActionConstants(t *testing.T) {
 	assert.Equal(t, DriftAction("TriggerJob"), DriftActionTriggerJob)
-	assert.Equal(t, DriftAction("UpdateStatus"), DriftActionUpdateStatus)
 	assert.Equal(t, DriftAction("None"), DriftActionNone)
 }

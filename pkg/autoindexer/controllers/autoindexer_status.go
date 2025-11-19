@@ -69,6 +69,7 @@ func (r *AutoIndexerReconciler) setAutoIndexerCondition(autoIndexerObj *autoinde
 		Reason:             reason,
 		Message:            message,
 		LastTransitionTime: metav1.Now(),
+		ObservedGeneration: autoIndexerObj.Generation,
 	}
 
 	// Find and update existing condition or append new one

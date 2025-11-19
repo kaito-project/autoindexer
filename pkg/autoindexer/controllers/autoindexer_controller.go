@@ -537,7 +537,7 @@ func hasOwnerReference(obj metav1.Object, owner metav1.Object) bool {
 
 // handleDriftRemediationJobCompletion checks for completed drift remediation jobs and unsuspends the AutoIndexer if necessary
 func (r *AutoIndexerReconciler) handleDriftRemediationJobCompletion(ctx context.Context, autoIndexerObj *autoindexerv1alpha1.AutoIndexer) error {
-	// Only check if this AutoIndexer was suspended for drift remediation
+	// Only check if this AutoIndexer was in drift remediation
 	if autoIndexerObj.Annotations["autoindexer.kaito.sh/drift-remediation"] != "true" {
 		return nil
 	}

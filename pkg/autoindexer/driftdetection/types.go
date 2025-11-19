@@ -63,8 +63,6 @@ type DriftAction string
 const (
 	// DriftActionTriggerJob triggers a new indexing job for one-time AutoIndexers
 	DriftActionTriggerJob DriftAction = "TriggerJob"
-	// DriftActionUpdateStatus updates the status to reflect the detected drift
-	DriftActionUpdateStatus DriftAction = "UpdateStatus"
 	// DriftActionNone no action needed
 	DriftActionNone DriftAction = "None"
 )
@@ -89,11 +87,11 @@ type DriftDetectionResult struct {
 
 // DriftDetectorImpl implements the DriftDetector interface
 type DriftDetectorImpl struct {
-	client          client.Client
-	ragClient       RAGEngineClient
-	config          DriftDetectionConfig
-	logger          logr.Logger
-	stopCh          chan struct{}
-	ticker          *time.Ticker
-	reconcilerFunc  func(result DriftDetectionResult) error
+	client         client.Client
+	ragClient      RAGEngineClient
+	config         DriftDetectionConfig
+	logger         logr.Logger
+	stopCh         chan struct{}
+	ticker         *time.Ticker
+	reconcilerFunc func(result DriftDetectionResult) error
 }
