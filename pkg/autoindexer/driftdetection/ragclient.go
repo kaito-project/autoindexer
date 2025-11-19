@@ -50,59 +50,59 @@ type DocumentListResponse struct {
 // GetDocumentCount gets the number of documents in the given index filtered by autoindexer
 func (r *RAGEngineClientImpl) GetDocumentCount(ragEngineEndpoint, indexName, autoindexerName string) (int32, error) {
 	var lastErr error
-	
+
 	for attempt := 0; attempt <= r.maxRetries; attempt++ {
 		count, err := r.getDocumentCountAttempt(ragEngineEndpoint, indexName, autoindexerName)
 		if err == nil {
 			return count, nil
 		}
 		lastErr = err
-		
+
 		if attempt < r.maxRetries {
 			// Exponential backoff
 			time.Sleep(time.Duration(1<<attempt) * time.Second)
 		}
 	}
-	
+
 	return 0, fmt.Errorf("failed to get document count after %d attempts: %w", r.maxRetries+1, lastErr)
 }
 
 func (r *RAGEngineClientImpl) getDocumentCountAttempt(ragEngineEndpoint, indexName, autoindexerName string) (int32, error) {
 	// Construct the URL for listing documents
-	baseURL := fmt.Sprintf("%s/index/%s/documents", ragEngineEndpoint, url.QueryEscape(indexName))
-	
+	baseURL := fmt.Sprintf("%s/indexes/%s/documents", ragEngineEndpoint, url.QueryEscape(indexName))
+
 	// Add query parameters
 	params := url.Values{}
 	params.Add("limit", "1") // We only need the count, not the actual documents
 	params.Add("offset", "0")
 	// Add metadata filter for autoindexer
 	params.Add("metadata_filter", fmt.Sprintf(`{"autoindexer": "%s"}`, autoindexerName))
-	
+
 	requestURL := fmt.Sprintf("%s?%s", baseURL, params.Encode())
-	
+
 	// Make the HTTP request
 	resp, err := r.httpClient.Get(requestURL)
 	if err != nil {
 		return 0, fmt.Errorf("failed to make HTTP request to RAG engine: %w", err)
 	}
 	defer resp.Body.Close()
-	
+
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
 		return 0, fmt.Errorf("RAG engine returned non-200 status: %d, body: %s", resp.StatusCode, string(body))
 	}
-	
+
 	// Read and parse the response
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return 0, fmt.Errorf("failed to read response body: %w", err)
 	}
-	
+
 	var response DocumentListResponse
 	if err := json.Unmarshal(body, &response); err != nil {
 		return 0, fmt.Errorf("failed to parse response JSON: %w", err)
 	}
-	
+
 	return int32(response.TotalItems), nil
 }
 

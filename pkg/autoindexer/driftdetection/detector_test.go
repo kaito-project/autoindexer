@@ -39,14 +39,14 @@ func TestNewDriftDetector(t *testing.T) {
 	ragClient := &MockRAGEngineClient{}
 	config := DefaultDriftDetectionConfig()
 	logger := logr.Discard()
-	
+
 	reconcilerFunc := func(result DriftDetectionResult) error {
 		return nil
 	}
-	
+
 	detector := NewDriftDetector(client, ragClient, config, logger, reconcilerFunc)
 	assert.NotNil(t, detector)
-	
+
 	impl, ok := detector.(*DriftDetectorImpl)
 	assert.True(t, ok)
 	assert.NotNil(t, impl.client)
@@ -57,31 +57,31 @@ func TestNewDriftDetector(t *testing.T) {
 
 func TestDriftDetector_DetermineDriftAction(t *testing.T) {
 	detector := &DriftDetectorImpl{}
-	
+
 	// Test scheduled AutoIndexer
 	scheduledAutoIndexer := &autoindexerv1alpha1.AutoIndexer{
 		Spec: autoindexerv1alpha1.AutoIndexerSpec{
 			Schedule: stringPtr("0 0 * * *"), // Daily
 		},
 	}
-	
+
 	action := detector.determineDriftAction(scheduledAutoIndexer)
-	assert.Equal(t, DriftActionUpdateStatus, action)
-	
+	assert.Equal(t, DriftActionTriggerJob, action)
+
 	// Test one-time AutoIndexer
 	oneTimeAutoIndexer := &autoindexerv1alpha1.AutoIndexer{
 		Spec: autoindexerv1alpha1.AutoIndexerSpec{
 			Schedule: nil,
 		},
 	}
-	
+
 	action = detector.determineDriftAction(oneTimeAutoIndexer)
 	assert.Equal(t, DriftActionTriggerJob, action)
 }
 
 func TestDriftDetector_IsAutoIndexerInStableState(t *testing.T) {
 	detector := &DriftDetectorImpl{}
-	
+
 	testCases := []struct {
 		phase    autoindexerv1alpha1.AutoIndexerPhase
 		expected bool
@@ -93,14 +93,14 @@ func TestDriftDetector_IsAutoIndexerInStableState(t *testing.T) {
 		{autoindexerv1alpha1.AutoIndexerPhaseRetrying, false},
 		{autoindexerv1alpha1.AutoIndexerPhaseUnknown, false},
 	}
-	
+
 	for _, tc := range testCases {
 		autoIndexer := &autoindexerv1alpha1.AutoIndexer{
 			Status: autoindexerv1alpha1.AutoIndexerStatus{
 				IndexingPhase: tc.phase,
 			},
 		}
-		
+
 		result := detector.isAutoIndexerInStableState(autoIndexer)
 		assert.Equal(t, tc.expected, result, "Phase %s should return %v", tc.phase, tc.expected)
 	}

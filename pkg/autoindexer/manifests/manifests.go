@@ -74,7 +74,7 @@ func GenerateIndexingJobManifest(config JobConfig) *batchv1.Job {
 			Namespace: config.AutoIndexer.Namespace,
 			Labels:    labels,
 			Annotations: map[string]string{
-				"autoindexer.kaito.io/spec-hash": generateSpecHash(config.AutoIndexer.Spec),
+				"autoindexer.kaito.sh/spec-hash": generateSpecHash(config.AutoIndexer.Spec),
 			},
 			OwnerReferences: []metav1.OwnerReference{
 				*metav1.NewControllerRef(config.AutoIndexer, v1alpha1.GroupVersion.WithKind("AutoIndexer")),
@@ -121,7 +121,7 @@ func GenerateIndexingCronJobManifest(config JobConfig) *batchv1.CronJob {
 			Namespace: config.AutoIndexer.Namespace,
 			Labels:    labels,
 			Annotations: map[string]string{
-				"autoindexer.kaito.io/spec-hash": generateSpecHash(config.AutoIndexer.Spec),
+				"autoindexer.kaito.sh/spec-hash": generateSpecHash(config.AutoIndexer.Spec),
 			},
 			OwnerReferences: []metav1.OwnerReference{
 				*metav1.NewControllerRef(config.AutoIndexer, v1alpha1.GroupVersion.WithKind("AutoIndexer")),

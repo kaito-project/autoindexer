@@ -90,8 +90,8 @@ func (r *DriftReconciler) triggerJob(ctx context.Context, result DriftDetectionR
 			if autoIndexer.Annotations == nil {
 				autoIndexer.Annotations = make(map[string]string)
 			}
-			autoIndexer.Annotations["autoindexer.kaito.io/drift-remediation-suspended"] = "true"
-			autoIndexer.Annotations["autoindexer.kaito.io/original-suspend-state"] = fmt.Sprintf("%t", originalSuspendState)
+			autoIndexer.Annotations["autoindexer.kaito.sh/drift-remediation-suspended"] = "true"
+			autoIndexer.Annotations["autoindexer.kaito.sh/original-suspend-state"] = fmt.Sprintf("%t", originalSuspendState)
 
 			// Update the AutoIndexer to suspend it
 			if err := r.client.Update(ctx, autoIndexer); err != nil {
@@ -125,13 +125,13 @@ func (r *DriftReconciler) triggerJob(ctx context.Context, result DriftDetectionR
 	if job.Labels == nil {
 		job.Labels = make(map[string]string)
 	}
-	job.Labels["autoindexer.kaito.io/drift-remediation"] = "true"
+	job.Labels["autoindexer.kaito.sh/drift-remediation"] = "true"
 
 	// Add the same labels to the pod template
 	if job.Spec.Template.Labels == nil {
 		job.Spec.Template.Labels = make(map[string]string)
 	}
-	job.Spec.Template.Labels["autoindexer.kaito.io/drift-remediation"] = "true"
+	job.Spec.Template.Labels["autoindexer.kaito.sh/drift-remediation"] = "true"
 
 	// Set the AutoIndexer as the owner of the Job
 	if err := controllerutil.SetControllerReference(autoIndexer, job, r.client.Scheme()); err != nil {
@@ -172,6 +172,7 @@ func (r *DriftReconciler) updateStatus(ctx context.Context, result DriftDetectio
 		return fmt.Errorf("failed to get AutoIndexer: %w", err)
 	}
 
+	existingAutoIndexer := autoIndexer.DeepCopy()
 	// Update status to reflect the actual count
 	autoIndexer.Status.NumOfDocumentInIndex = result.ActualCount
 
@@ -179,7 +180,7 @@ func (r *DriftReconciler) updateStatus(ctx context.Context, result DriftDetectio
 	r.updateDriftCondition(autoIndexer, result)
 
 	// Update the status
-	if err := r.client.Status().Update(ctx, autoIndexer); err != nil {
+	if err := r.client.Status().Patch(ctx, autoIndexer, client.MergeFrom(existingAutoIndexer)); err != nil {
 		return fmt.Errorf("failed to update AutoIndexer status: %w", err)
 	}
 
@@ -203,6 +204,8 @@ func (r *DriftReconciler) updateStatusWithDriftRemediation(ctx context.Context, 
 		return fmt.Errorf("failed to get fresh AutoIndexer for status update: %w", err)
 	}
 
+	existingFreshAutoIndexer := freshAutoIndexer.DeepCopy()
+
 	// Update indexing phase to indicate drift remediation
 	freshAutoIndexer.Status.IndexingPhase = autoindexerv1alpha1.AutoIndexerPhaseRunning
 
@@ -210,7 +213,7 @@ func (r *DriftReconciler) updateStatusWithDriftRemediation(ctx context.Context, 
 	r.addDriftRemediationCondition(freshAutoIndexer, result)
 
 	// Update the status
-	if err := r.client.Status().Update(ctx, freshAutoIndexer); err != nil {
+	if err := r.client.Status().Patch(ctx, freshAutoIndexer, client.MergeFrom(existingFreshAutoIndexer)); err != nil {
 		return fmt.Errorf("failed to update AutoIndexer status for drift remediation: %w", err)
 	}
 

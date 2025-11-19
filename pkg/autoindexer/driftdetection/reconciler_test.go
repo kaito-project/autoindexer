@@ -86,11 +86,11 @@ func TestDriftReconciler_TriggerJob_ScheduledAutoIndexer_Suspension(t *testing.T
 		}
 
 		// Verify annotations are set
-		if updatedAutoIndexer.Annotations["autoindexer.kaito.io/drift-remediation-suspended"] != "true" {
+		if updatedAutoIndexer.Annotations["autoindexer.kaito.sh/drift-remediation-suspended"] != "true" {
 			t.Errorf("Expected drift-remediation-suspended annotation to be true")
 		}
 
-		if updatedAutoIndexer.Annotations["autoindexer.kaito.io/original-suspend-state"] != "false" {
+		if updatedAutoIndexer.Annotations["autoindexer.kaito.sh/original-suspend-state"] != "false" {
 			t.Errorf("Expected original-suspend-state annotation to be false")
 		}
 
@@ -105,7 +105,7 @@ func TestDriftReconciler_TriggerJob_ScheduledAutoIndexer_Suspension(t *testing.T
 			t.Errorf("Expected 1 job to be created, but got %d", len(jobs.Items))
 		} else {
 			job := jobs.Items[0]
-			if job.Labels["autoindexer.kaito.io/drift-remediation"] != "true" {
+			if job.Labels["autoindexer.kaito.sh/drift-remediation"] != "true" {
 				t.Errorf("Expected job to have drift-remediation label set to true")
 			}
 		}
@@ -165,7 +165,7 @@ func TestDriftReconciler_TriggerJob_ScheduledAutoIndexer_Suspension(t *testing.T
 		}
 
 		// Verify no drift remediation annotations are set since it was already suspended
-		if updatedAutoIndexer.Annotations["autoindexer.kaito.io/drift-remediation-suspended"] == "true" {
+		if updatedAutoIndexer.Annotations["autoindexer.kaito.sh/drift-remediation-suspended"] == "true" {
 			t.Errorf("Did not expect drift-remediation-suspended annotation to be set for already suspended AutoIndexer")
 		}
 	})
@@ -223,7 +223,7 @@ func TestDriftReconciler_TriggerJob_ScheduledAutoIndexer_Suspension(t *testing.T
 		}
 
 		// Verify no drift remediation annotations are set
-		if updatedAutoIndexer.Annotations["autoindexer.kaito.io/drift-remediation-suspended"] == "true" {
+		if updatedAutoIndexer.Annotations["autoindexer.kaito.sh/drift-remediation-suspended"] == "true" {
 			t.Errorf("One-time AutoIndexer should not have drift-remediation-suspended annotation")
 		}
 	})

@@ -59,11 +59,11 @@ func (d *DriftDetectorImpl) Start(stopCh <-chan struct{}) error {
 // Stop stops the drift detection process
 func (d *DriftDetectorImpl) Stop() error {
 	d.logger.Info("Stopping drift detection")
-	
+
 	if d.ticker != nil {
 		d.ticker.Stop()
 	}
-	
+
 	close(d.stopCh)
 	return nil
 }
@@ -112,21 +112,21 @@ func (d *DriftDetectorImpl) performDriftCheck() {
 	// Check each AutoIndexer for drift
 	for _, autoIndexer := range autoIndexers.Items {
 		result := d.checkAutoIndexerDrift(ctx, &autoIndexer)
-		
+
 		// Log the result
 		if result.Error != nil {
-			d.logger.Error(result.Error, "Drift check failed", 
-				"autoindexer", result.AutoIndexerName, 
+			d.logger.Error(result.Error, "Drift check failed",
+				"autoindexer", result.AutoIndexerName,
 				"namespace", result.AutoIndexerNamespace)
 		} else if result.DriftDetected {
-			d.logger.Info("Drift detected", 
+			d.logger.Info("Drift detected",
 				"autoindexer", result.AutoIndexerName,
 				"namespace", result.AutoIndexerNamespace,
 				"expected", result.ExpectedCount,
 				"actual", result.ActualCount,
 				"action", result.Action)
 		} else {
-			d.logger.V(1).Info("No drift detected", 
+			d.logger.Info("No drift detected",
 				"autoindexer", result.AutoIndexerName,
 				"namespace", result.AutoIndexerNamespace,
 				"count", result.ActualCount)
@@ -135,8 +135,8 @@ func (d *DriftDetectorImpl) performDriftCheck() {
 		// Call the reconciler function if drift is detected
 		if result.DriftDetected && d.reconcilerFunc != nil {
 			if err := d.reconcilerFunc(result); err != nil {
-				d.logger.Error(err, "Failed to handle drift", 
-					"autoindexer", result.AutoIndexerName, 
+				d.logger.Error(err, "Failed to handle drift",
+					"autoindexer", result.AutoIndexerName,
 					"namespace", result.AutoIndexerNamespace)
 			}
 		}
@@ -155,8 +155,8 @@ func (d *DriftDetectorImpl) checkAutoIndexerDrift(ctx context.Context, autoIndex
 
 	// Skip if AutoIndexer is not in a stable state
 	if !d.isAutoIndexerInStableState(autoIndexer) {
-		d.logger.V(1).Info("Skipping drift check for AutoIndexer not in stable state", 
-			"autoindexer", autoIndexer.Name, 
+		d.logger.V(1).Info("Skipping drift check for AutoIndexer not in stable state",
+			"autoindexer", autoIndexer.Name,
 			"namespace", autoIndexer.Namespace,
 			"phase", autoIndexer.Status.IndexingPhase)
 		return result
@@ -164,8 +164,8 @@ func (d *DriftDetectorImpl) checkAutoIndexerDrift(ctx context.Context, autoIndex
 
 	// Skip if AutoIndexer is suspended
 	if autoIndexer.Spec.Suspend != nil && *autoIndexer.Spec.Suspend {
-		d.logger.V(1).Info("Skipping drift check for suspended AutoIndexer", 
-			"autoindexer", autoIndexer.Name, 
+		d.logger.V(1).Info("Skipping drift check for suspended AutoIndexer",
+			"autoindexer", autoIndexer.Name,
 			"namespace", autoIndexer.Namespace)
 		return result
 	}
@@ -184,6 +184,12 @@ func (d *DriftDetectorImpl) checkAutoIndexerDrift(ctx context.Context, autoIndex
 
 	// Check for drift
 	if result.ExpectedCount != actualCount {
+		d.logger.V(1).Info("Document count changed, drift detected",
+			"autoindexer", autoIndexer.Name,
+			"namespace", autoIndexer.Namespace,
+			"expected", result.ExpectedCount,
+			"actual", actualCount)
+
 		result.DriftDetected = true
 		result.Action = d.determineDriftAction(autoIndexer)
 	}
@@ -200,8 +206,8 @@ func (d *DriftDetectorImpl) isAutoIndexerInStableState(autoIndexer *autoindexerv
 		// Allow checking failed indexers in case the failure was temporary
 		return true
 	case autoindexerv1alpha1.AutoIndexerPhasePending,
-		 autoindexerv1alpha1.AutoIndexerPhaseRunning,
-		 autoindexerv1alpha1.AutoIndexerPhaseRetrying:
+		autoindexerv1alpha1.AutoIndexerPhaseRunning,
+		autoindexerv1alpha1.AutoIndexerPhaseRetrying:
 		// Skip actively running or pending indexers
 		return false
 	default:
@@ -212,13 +218,6 @@ func (d *DriftDetectorImpl) isAutoIndexerInStableState(autoIndexer *autoindexerv
 
 // determineDriftAction determines what action to take when drift is detected
 func (d *DriftDetectorImpl) determineDriftAction(autoIndexer *autoindexerv1alpha1.AutoIndexer) DriftAction {
-	// For scheduled AutoIndexers, just update the status
-	// The next scheduled run will handle the drift
-	if autoIndexer.Spec.Schedule != nil {
-		return DriftActionUpdateStatus
-	}
-
-	// For one-time AutoIndexers, trigger a new job
-	// This helps handle cases where the index was corrupted or documents were lost
+	// Create a job to remediate drift
 	return DriftActionTriggerJob
 }

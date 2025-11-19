@@ -181,13 +181,13 @@ type AutoIndexerStatus struct {
 	IndexingPhase AutoIndexerPhase `json:"indexingPhase,omitempty"`
 
 	// SuccessfulIndexingCount tracks successful indexing runs
-	SuccessfulIndexingCount int32 `json:"successfulIndexingCount"`
+	SuccessfulIndexingCount int32 `json:"successfulIndexingCount,omitempty"`
 
 	// ErrorIndexingCount tracks failed indexing runs
-	ErrorIndexingCount int32 `json:"errorIndexingCount"`
+	ErrorIndexingCount int32 `json:"errorIndexingCount,omitempty"`
 
 	// NumOfDocumentInIndex is the count of documents in the index after the latest run managed by this autoindexer instance
-	NumOfDocumentInIndex int32 `json:"numOfDocumentInIndex"`
+	NumOfDocumentInIndex int32 `json:"numOfDocumentInIndex,omitempty"`
 
 	// NextScheduledIndexing shows when the next indexing is scheduled
 	// +optional

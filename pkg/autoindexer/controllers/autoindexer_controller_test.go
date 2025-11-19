@@ -232,8 +232,8 @@ func TestAutoIndexerReconciler_HandleDriftRemediationJobCompletion(t *testing.T)
 				Name:      "test-autoindexer",
 				Namespace: "default",
 				Annotations: map[string]string{
-					"autoindexer.kaito.io/drift-remediation-suspended": "true",
-					"autoindexer.kaito.io/original-suspend-state":      "false",
+					"autoindexer.kaito.sh/drift-remediation-suspended": "true",
+					"autoindexer.kaito.sh/original-suspend-state":      "false",
 				},
 			},
 			Spec: autoindexerv1alpha1.AutoIndexerSpec{
@@ -257,8 +257,8 @@ func TestAutoIndexerReconciler_HandleDriftRemediationJobCompletion(t *testing.T)
 				Name:      "test-autoindexer-drift-remediation-123",
 				Namespace: "default",
 				Labels: map[string]string{
-					"autoindexer.kaito.io/name":              "test-autoindexer",
-					"autoindexer.kaito.io/drift-remediation": "true",
+					"autoindexer.kaito.sh/name":              "test-autoindexer",
+					"autoindexer.kaito.sh/drift-remediation": "true",
 				},
 				OwnerReferences: []metav1.OwnerReference{
 					*metav1.NewControllerRef(autoIndexer, autoindexerv1alpha1.GroupVersion.WithKind("AutoIndexer")),
@@ -295,11 +295,11 @@ func TestAutoIndexerReconciler_HandleDriftRemediationJobCompletion(t *testing.T)
 		}
 
 		// Verify annotations are removed
-		if updatedAutoIndexer.Annotations["autoindexer.kaito.io/drift-remediation-suspended"] != "" {
+		if updatedAutoIndexer.Annotations["autoindexer.kaito.sh/drift-remediation-suspended"] != "" {
 			t.Errorf("Expected drift-remediation-suspended annotation to be removed")
 		}
 
-		if updatedAutoIndexer.Annotations["autoindexer.kaito.io/original-suspend-state"] != "" {
+		if updatedAutoIndexer.Annotations["autoindexer.kaito.sh/original-suspend-state"] != "" {
 			t.Errorf("Expected original-suspend-state annotation to be removed")
 		}
 	})
@@ -314,8 +314,8 @@ func TestAutoIndexerReconciler_HandleDriftRemediationJobCompletion(t *testing.T)
 				Name:      "test-autoindexer",
 				Namespace: "default",
 				Annotations: map[string]string{
-					"autoindexer.kaito.io/drift-remediation-suspended": "true",
-					"autoindexer.kaito.io/original-suspend-state":      "false",
+					"autoindexer.kaito.sh/drift-remediation-suspended": "true",
+					"autoindexer.kaito.sh/original-suspend-state":      "false",
 				},
 			},
 			Spec: autoindexerv1alpha1.AutoIndexerSpec{
@@ -339,8 +339,8 @@ func TestAutoIndexerReconciler_HandleDriftRemediationJobCompletion(t *testing.T)
 				Name:      "test-autoindexer-drift-remediation-123",
 				Namespace: "default",
 				Labels: map[string]string{
-					"autoindexer.kaito.io/name":              "test-autoindexer",
-					"autoindexer.kaito.io/drift-remediation": "true",
+					"autoindexer.kaito.sh/name":              "test-autoindexer",
+					"autoindexer.kaito.sh/drift-remediation": "true",
 				},
 				OwnerReferences: []metav1.OwnerReference{
 					*metav1.NewControllerRef(autoIndexer, autoindexerv1alpha1.GroupVersion.WithKind("AutoIndexer")),
@@ -377,7 +377,7 @@ func TestAutoIndexerReconciler_HandleDriftRemediationJobCompletion(t *testing.T)
 		}
 
 		// Verify annotations remain
-		if updatedAutoIndexer.Annotations["autoindexer.kaito.io/drift-remediation-suspended"] != "true" {
+		if updatedAutoIndexer.Annotations["autoindexer.kaito.sh/drift-remediation-suspended"] != "true" {
 			t.Errorf("Expected drift-remediation-suspended annotation to remain while jobs are running")
 		}
 	})
