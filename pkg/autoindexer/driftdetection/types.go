@@ -46,7 +46,7 @@ func DefaultDriftDetectionConfig() DriftDetectionConfig {
 type RAGEngineClient interface {
 	// GetDocumentCount returns the number of documents in the given index
 	// filtered by the autoindexer metadata
-	GetDocumentCount(ragEngineEndpoint, indexName, autoindexerName string) (int32, error)
+	GetDocumentCount(ragEngineEndpoint, indexName, autoindexerName, autoIndexerNamespace string) (int32, error)
 }
 
 // DriftDetector defines the interface for drift detection

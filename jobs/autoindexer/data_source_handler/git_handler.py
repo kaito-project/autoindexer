@@ -262,19 +262,21 @@ class GitDataSourceHandler(DataSourceHandler):
                     if not content:
                         continue
                     list_resp = self.rag_client.list_documents(self.index_name, {"file_path": file_path}, limit=1)
-                    if not list_resp.documents:
-                        logger.warning(f"Failed to fetch file from rag {file_path} for update, indexing as new document")
-                        doc = self._create_document(file_path, content, "added")
-                        create_docs.append(doc)
-                        continue
-                    else:
+                    if list_resp and list_resp.documents:
                         doc = self._create_document(file_path, content, "modified")
                         doc.doc_id = list_resp.documents[0].doc_id
                         update_docs.append(doc)
+                    else:
+                        logger.warning(f"Failed to fetch file from rag {file_path} for update, indexing as new document")
+                        doc = self._create_document(file_path, content, "added")
+                        create_docs.append(doc)
                         
                 elif diff_item.change_type == 'D':  # Deleted
-                    doc_id = self._generate_document_id(file_path)
-                    delete_doc_ids.append(doc_id)
+                    list_resp = self.rag_client.list_documents(self.index_name, {"file_path": file_path}, limit=1)
+                    if not list_resp or not list_resp.documents:
+                        logger.warning(f"Failed to fetch file from rag {file_path} for deletion")
+                        continue
+                    delete_doc_ids.append(list_resp.documents[0].doc_id)
                     
                 elif diff_item.change_type == 'R':  # Renamed
                     # Delete old document and create new one
@@ -283,12 +285,12 @@ class GitDataSourceHandler(DataSourceHandler):
                         continue
                     if diff_item.a_path:
                         list_resp = self.rag_client.list_documents(self.index_name, {"file_path": diff_item.a_path}, limit=1)
-                        if not list_resp.documents:
-                            logger.warning(f"Failed to fetch file from rag {diff_item.a_path} for renaming, indexing as new document")
-                        else:
+                        if list_resp and list_resp.documents:
                             doc = self._create_document(file_path, content, "renamed")
                             doc.doc_id = list_resp.documents[0].doc_id
                             update_docs.append(doc)
+                        else:
+                            logger.warning(f"Failed to fetch file from rag {diff_item.a_path} for renaming, indexing as new document")
                 
                 if len(create_docs) >= 10:
                     self._index_documents_batch(create_docs)
@@ -325,7 +327,7 @@ class GitDataSourceHandler(DataSourceHandler):
                     content = self._read_file_content(file_path)
                     resp = self.rag_client.list_documents(self.index_name, {"file_path": file_path}, limit=1)
                     new_doc = self._create_document(file_path, content, "drift_remediation")
-                    if resp.documents:
+                    if resp and resp.documents:
                         resp_doc_id = resp.documents[0].doc_id
                         new_doc.doc_id = resp_doc_id
                         update_docs.append(new_doc)
@@ -472,10 +474,6 @@ class GitDataSourceHandler(DataSourceHandler):
         )
         
         return doc
-
-    def _generate_document_id(self, file_path: str) -> str:
-        """Generate a unique document ID for a file."""
-        return f"{self.autoindexer_name}:{self.repository}:{file_path}".replace("/", "_").replace(":", "_")
 
     def _index_documents_batch(self, documents: list[Document]):
         """Index a batch of documents."""

@@ -29,8 +29,8 @@ type MockRAGEngineClient struct {
 	mock.Mock
 }
 
-func (m *MockRAGEngineClient) GetDocumentCount(ragEngineEndpoint, indexName, autoindexerName string) (int32, error) {
-	args := m.Called(ragEngineEndpoint, indexName, autoindexerName)
+func (m *MockRAGEngineClient) GetDocumentCount(ragEngineEndpoint, indexName, autoindexerName, autoIndexerNamespace string) (int32, error) {
+	args := m.Called(ragEngineEndpoint, indexName, autoindexerName, autoIndexerNamespace)
 	return args.Get(0).(int32), args.Error(1)
 }
 

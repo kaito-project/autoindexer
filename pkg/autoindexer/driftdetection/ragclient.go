@@ -48,11 +48,11 @@ type DocumentListResponse struct {
 }
 
 // GetDocumentCount gets the number of documents in the given index filtered by autoindexer
-func (r *RAGEngineClientImpl) GetDocumentCount(ragEngineEndpoint, indexName, autoindexerName string) (int32, error) {
+func (r *RAGEngineClientImpl) GetDocumentCount(ragEngineEndpoint, indexName, autoindexerName, autoIndexerNamespace string) (int32, error) {
 	var lastErr error
 
 	for attempt := 0; attempt <= r.maxRetries; attempt++ {
-		count, err := r.getDocumentCountAttempt(ragEngineEndpoint, indexName, autoindexerName)
+		count, err := r.getDocumentCountAttempt(ragEngineEndpoint, indexName, autoindexerName, autoIndexerNamespace)
 		if err == nil {
 			return count, nil
 		}
@@ -67,7 +67,7 @@ func (r *RAGEngineClientImpl) GetDocumentCount(ragEngineEndpoint, indexName, aut
 	return 0, fmt.Errorf("failed to get document count after %d attempts: %w", r.maxRetries+1, lastErr)
 }
 
-func (r *RAGEngineClientImpl) getDocumentCountAttempt(ragEngineEndpoint, indexName, autoindexerName string) (int32, error) {
+func (r *RAGEngineClientImpl) getDocumentCountAttempt(ragEngineEndpoint, indexName, autoindexerName, autoIndexerNamespace string) (int32, error) {
 	// Construct the URL for listing documents
 	baseURL := fmt.Sprintf("%s/indexes/%s/documents", ragEngineEndpoint, url.QueryEscape(indexName))
 
@@ -76,7 +76,7 @@ func (r *RAGEngineClientImpl) getDocumentCountAttempt(ragEngineEndpoint, indexNa
 	params.Add("limit", "1") // We only need the count, not the actual documents
 	params.Add("offset", "0")
 	// Add metadata filter for autoindexer
-	params.Add("metadata_filter", fmt.Sprintf(`{"autoindexer": "%s"}`, autoindexerName))
+	params.Add("metadata_filter", fmt.Sprintf(`{"autoindexer": "%s_%s"}`, autoIndexerNamespace, autoindexerName))
 
 	requestURL := fmt.Sprintf("%s?%s", baseURL, params.Encode())
 

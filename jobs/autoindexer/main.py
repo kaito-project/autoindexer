@@ -173,12 +173,15 @@ class AutoIndexerJob:
                     self.datasource_config["driftRemediationRun"] = annotations["autoindexer.kaito.sh/drift-remediation"].lower() == "true"
                     logger.info(f"drift remediation annotations: {self.datasource_config['driftRemediationRun']}")
                 
+                # Make sure autoindexer_name includes namespace for uniqueness
+                autoindexer_full_name = f"{self.namespace}_{self.autoindexer_name}"
+                
                 # Add specific data source configurations based on type
                 if ds_config.get("git") and ds_config["type"] == "Git":
                     git_config = ds_config["git"]
 
                     self.datasource_config.update({
-                        "autoindexer_name": self.autoindexer_name,
+                        "autoindexer_name": autoindexer_full_name,
                         "repository": git_config.get("repository"),
                         "branch": git_config.get("branch", "main"),
                         "commit": git_config.get("commit"),
@@ -191,7 +194,7 @@ class AutoIndexerJob:
                 elif ds_config.get("static") and ds_config["type"] == "Static":
                     static_config = ds_config["static"]
                     self.datasource_config.update({
-                        "autoindexer_name": self.autoindexer_name,
+                        "autoindexer_name": autoindexer_full_name,
                         "urls": static_config.get("urls", [])
                     })
                     logger.info("Updated Static data source configuration from CRD")

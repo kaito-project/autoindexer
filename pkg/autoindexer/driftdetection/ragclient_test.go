@@ -27,7 +27,7 @@ import (
 func TestNewRAGEngineClient(t *testing.T) {
 	client := NewRAGEngineClient(30*time.Second, 3)
 	assert.NotNil(t, client)
-	
+
 	impl, ok := client.(*RAGEngineClientImpl)
 	require.True(t, ok)
 	assert.Equal(t, 30*time.Second, impl.httpClient.Timeout)
@@ -43,22 +43,22 @@ func TestRAGEngineClient_GetDocumentCount_Success(t *testing.T) {
 			Metadata map[string]string `json:"metadata"`
 		}{},
 	}
-	
+
 	// Create test server
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, "/indexes/test-index/documents", r.URL.Path)
 		assert.Equal(t, "1", r.URL.Query().Get("limit"))
 		assert.Equal(t, "0", r.URL.Query().Get("offset"))
-		assert.Contains(t, r.URL.Query().Get("metadata_filter"), `"autoindexer": "test-autoindexer"`)
-		
+		assert.Contains(t, r.URL.Query().Get("metadata_filter"), `"autoindexer": "default_test-autoindexer"`)
+
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(response)
 	}))
 	defer server.Close()
-	
+
 	client := NewRAGEngineClient(30*time.Second, 1)
-	count, err := client.GetDocumentCount(server.URL, "test-index", "test-autoindexer")
-	
+	count, err := client.GetDocumentCount(server.URL, "test-index", "test-autoindexer", "default")
+
 	require.NoError(t, err)
 	assert.Equal(t, int32(42), count)
 }
@@ -70,10 +70,10 @@ func TestRAGEngineClient_GetDocumentCount_HTTPError(t *testing.T) {
 		w.Write([]byte("Internal Server Error"))
 	}))
 	defer server.Close()
-	
+
 	client := NewRAGEngineClient(30*time.Second, 1)
-	count, err := client.GetDocumentCount(server.URL, "test-index", "test-autoindexer")
-	
+	count, err := client.GetDocumentCount(server.URL, "test-index", "test-autoindexer", "default")
+
 	assert.Error(t, err)
 	assert.Equal(t, int32(0), count)
 	assert.Contains(t, err.Error(), "RAG engine returned non-200 status: 500")
@@ -86,10 +86,10 @@ func TestRAGEngineClient_GetDocumentCount_InvalidJSON(t *testing.T) {
 		w.Write([]byte("invalid json"))
 	}))
 	defer server.Close()
-	
+
 	client := NewRAGEngineClient(30*time.Second, 1)
-	count, err := client.GetDocumentCount(server.URL, "test-index", "test-autoindexer")
-	
+	count, err := client.GetDocumentCount(server.URL, "test-index", "test-autoindexer", "default")
+
 	assert.Error(t, err)
 	assert.Equal(t, int32(0), count)
 	assert.Contains(t, err.Error(), "failed to parse response JSON")

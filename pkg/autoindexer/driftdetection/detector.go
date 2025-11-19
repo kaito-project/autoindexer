@@ -174,7 +174,7 @@ func (d *DriftDetectorImpl) checkAutoIndexerDrift(ctx context.Context, autoIndex
 	ragEngineEndpoint := generateRAGEngineEndpoint(autoIndexer.Spec.RAGEngine, autoIndexer.Namespace)
 
 	// Get actual document count from RAG engine
-	actualCount, err := d.ragClient.GetDocumentCount(ragEngineEndpoint, autoIndexer.Spec.IndexName, autoIndexer.Name)
+	actualCount, err := d.ragClient.GetDocumentCount(ragEngineEndpoint, autoIndexer.Spec.IndexName, autoIndexer.Name, autoIndexer.Namespace)
 	if err != nil {
 		result.Error = fmt.Errorf("failed to get document count from RAG engine: %w", err)
 		return result
