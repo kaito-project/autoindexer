@@ -91,18 +91,22 @@ func (r *DriftReconciler) triggerJob(ctx context.Context, result DriftDetectionR
 				autoIndexer.Annotations = make(map[string]string)
 			}
 			autoIndexer.Annotations["autoindexer.kaito.sh/drift-remediation-suspended"] = "true"
-			autoIndexer.Annotations["autoindexer.kaito.sh/original-suspend-state"] = fmt.Sprintf("%t", originalSuspendState)
-
-			// Update the AutoIndexer to suspend it
-			if err := r.client.Update(ctx, autoIndexer); err != nil {
-				return fmt.Errorf("failed to suspend AutoIndexer during drift remediation: %w", err)
-			}
-
 			r.logger.Info("Suspended AutoIndexer for drift remediation",
 				"autoindexer", result.AutoIndexerName,
 				"namespace", result.AutoIndexerNamespace,
 				"original-suspend-state", originalSuspendState)
 		}
+	}
+
+	// Add annotation to track the autoindexer is under drift remediation
+	if autoIndexer.Annotations == nil {
+		autoIndexer.Annotations = make(map[string]string)
+	}
+	autoIndexer.Annotations["autoindexer.kaito.sh/drift-remediation"] = "true"
+
+	// Update the AutoIndexer to suspend it
+	if err := r.client.Update(ctx, autoIndexer); err != nil {
+		return fmt.Errorf("failed to update AutoIndexer during drift remediation: %w", err)
 	}
 
 	// Generate a unique job name with timestamp
@@ -223,7 +227,7 @@ func (r *DriftReconciler) updateStatusWithDriftRemediation(ctx context.Context, 
 // updateDriftCondition adds or updates the drift detection condition
 func (r *DriftReconciler) updateDriftCondition(autoIndexer *autoindexerv1alpha1.AutoIndexer, result DriftDetectionResult) {
 	condition := metav1.Condition{
-		Type:               "DriftDetected",
+		Type:               string(autoindexerv1alpha1.AutoIndexerConditionTypeDriftDetected),
 		Status:             metav1.ConditionTrue,
 		LastTransitionTime: metav1.Now(),
 		Reason:             "DocumentCountMismatch",
@@ -249,7 +253,7 @@ func (r *DriftReconciler) updateDriftCondition(autoIndexer *autoindexerv1alpha1.
 // addDriftRemediationCondition adds a condition indicating drift remediation is in progress
 func (r *DriftReconciler) addDriftRemediationCondition(autoIndexer *autoindexerv1alpha1.AutoIndexer, result DriftDetectionResult) {
 	condition := metav1.Condition{
-		Type:               "DriftRemediation",
+		Type:               string(autoindexerv1alpha1.AutoIndexerConditionTypeDriftRemediation),
 		Status:             metav1.ConditionTrue,
 		LastTransitionTime: metav1.Now(),
 		Reason:             "RemediationJobCreated",

@@ -168,6 +168,11 @@ class AutoIndexerJob:
                 if not self.datasource_config:
                     self.datasource_config = {}
                 
+                annotations = crd_config.get("annotations", {})
+                if "autoindexer.kaito.sh/drift-remediation" in annotations:
+                    self.datasource_config["driftRemediationRun"] = annotations["autoindexer.kaito.sh/drift-remediation"].lower() == "true"
+                    logger.info(f"drift remediation annotations: {self.datasource_config['driftRemediationRun']}")
+                
                 # Add specific data source configurations based on type
                 if ds_config.get("git") and ds_config["type"] == "Git":
                     git_config = ds_config["git"]

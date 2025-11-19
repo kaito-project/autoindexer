@@ -564,7 +564,7 @@ func hasOwnerReference(obj metav1.Object, owner metav1.Object) bool {
 // handleDriftRemediationJobCompletion checks for completed drift remediation jobs and unsuspends the AutoIndexer if necessary
 func (r *AutoIndexerReconciler) handleDriftRemediationJobCompletion(ctx context.Context, autoIndexerObj *autoindexerv1alpha1.AutoIndexer) error {
 	// Only check if this AutoIndexer was suspended for drift remediation
-	if autoIndexerObj.Annotations["autoindexer.kaito.sh/drift-remediation-suspended"] != "true" {
+	if autoIndexerObj.Annotations["autoindexer.kaito.sh/drift-remediation"] != "true" {
 		return nil
 	}
 
@@ -604,22 +604,17 @@ func (r *AutoIndexerReconciler) handleDriftRemediationJobCompletion(ctx context.
 // unsuspendAfterDriftRemediation restores the original suspension state after drift remediation completes
 func (r *AutoIndexerReconciler) unsuspendAfterDriftRemediation(ctx context.Context, autoIndexerObj *autoindexerv1alpha1.AutoIndexer) error {
 	existingAutoIndexerObj := autoIndexerObj.DeepCopy()
-	// Get the original suspend state from annotations
-	originalSuspendStateStr := autoIndexerObj.Annotations["autoindexer.kaito.sh/original-suspend-state"]
-	if originalSuspendStateStr == "" {
-		// Default to false if annotation is missing
-		originalSuspendStateStr = "false"
-	}
-
-	originalSuspendState := originalSuspendStateStr == "true"
 
 	// Update the suspend state to the original value
-	autoIndexerObj.Spec.Suspend = &originalSuspendState
+	if autoIndexerObj.Annotations["autoindexer.kaito.sh/drift-remediation-suspended"] != "true" {
+		suspend := false
+		autoIndexerObj.Spec.Suspend = &suspend
+		delete(autoIndexerObj.Annotations, "autoindexer.kaito.sh/drift-remediation-suspended")
+	}
 
 	// Remove the drift remediation annotations
 	if autoIndexerObj.Annotations != nil {
-		delete(autoIndexerObj.Annotations, "autoindexer.kaito.sh/drift-remediation-suspended")
-		delete(autoIndexerObj.Annotations, "autoindexer.kaito.sh/original-suspend-state")
+		delete(autoIndexerObj.Annotations, "autoindexer.kaito.sh/drift-remediation")
 	}
 
 	// Update the AutoIndexer
@@ -628,7 +623,8 @@ func (r *AutoIndexerReconciler) unsuspendAfterDriftRemediation(ctx context.Conte
 	}
 
 	// Update the drift remediation condition to indicate completion
-	r.setAutoIndexerCondition(autoIndexerObj, "DriftRemediation", metav1.ConditionFalse, "RemediationCompleted", "Drift remediation completed, AutoIndexer resumed")
+	r.setAutoIndexerCondition(autoIndexerObj, autoindexerv1alpha1.AutoIndexerConditionTypeDriftRemediation, metav1.ConditionFalse, "RemediationCompleted", "Drift remediation completed, AutoIndexer resumed")
+	r.setAutoIndexerCondition(autoIndexerObj, autoindexerv1alpha1.AutoIndexerConditionTypeDriftDetected, metav1.ConditionFalse, "RemediationCompleted", "Drift remediation completed, AutoIndexer resumed")
 
 	// Update status (best effort - don't fail if status update fails)
 	if err := r.Client.Status().Patch(ctx, autoIndexerObj, client.MergeFrom(existingAutoIndexerObj)); err != nil {
@@ -640,8 +636,7 @@ func (r *AutoIndexerReconciler) unsuspendAfterDriftRemediation(ctx context.Conte
 
 	r.Log.Info("Unsuspended AutoIndexer after drift remediation completion",
 		"autoindexer", autoIndexerObj.Name,
-		"namespace", autoIndexerObj.Namespace,
-		"restored-suspend-state", originalSuspendState)
+		"namespace", autoIndexerObj.Namespace)
 
 	return nil
 }
