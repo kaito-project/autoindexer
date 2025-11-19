@@ -77,9 +77,9 @@ func (ic ImageConfig) GetImage() string {
 
 func GetJobImageConfig() ImageConfig {
 	return ImageConfig{
-		RegistryName: getEnv("PRESET_AUTO_INDEXER_REGISTRY_NAME", "mcr.microsoft.com/aks/kaito"),
-		ImageName:    getEnv("PRESET_AUTO_INDEXER_IMAGE_NAME", "kaito-autoindexer"),
-		ImageTag:     getEnv("PRESET_AUTO_INDEXER_IMAGE_TAG", "0.6.0"),
+		RegistryName: getEnv("AUTO_INDEXER_JOB_REGISTRY_NAME", "mcr.microsoft.com/aks/kaito"),
+		ImageName:    getEnv("AUTO_INDEXER_JOB_IMAGE_NAME", "kaito-autoindexer"),
+		ImageTag:     getEnv("AUTO_INDEXER_JOB_IMAGE_TAG", "0.6.0"),
 	}
 }
 

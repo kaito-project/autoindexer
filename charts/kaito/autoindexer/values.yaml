@@ -30,7 +30,6 @@ resources:
 nodeSelector: {}
 tolerations: []
 affinity: {}
-presetAutoIndexerRegistryName: "brfoletest.azurecr.io"
-presetAutoIndexerImageName: "autoindexer-job"
-presetAutoIndexerImageTag: latest
-clusterName: kaito-dogfood
+autoIndexerJobRegistryName: "brfoletest.azurecr.io"
+autoIndexerJobImageName: "autoindexer-job"
+autoIndexerJobImageTag: latest
