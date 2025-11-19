@@ -62,6 +62,7 @@ class DataSourceHandler(ABC):
         """
         current_ai = autoindexer_client.get_autoindexer()
         current_status = current_ai["status"]
+        current_generation = current_ai.get("metadata", {}).get("generation", 0)
 
         status_update = {
             "lastIndexingTimestamp": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
@@ -86,23 +87,23 @@ class DataSourceHandler(ABC):
         # Create conditions
         conditions = {}
         conditions["AutoIndexerSucceeded"] = autoindexer_client._create_condition(
-            "AutoIndexerSucceeded", "True", "IndexingCompleted", "Indexing completed successfully"
+            "AutoIndexerSucceeded", "True", "IndexingCompleted", "Indexing completed successfully", observed_generation=current_generation
         )
         
         if errors:
             conditions["AutoIndexerError"] = autoindexer_client._create_condition(
-                "AutoIndexerError", "True", "IndexingErrors", f"Indexing completed with errors: {errors}"
+                "AutoIndexerError", "True", "IndexingErrors", f"Indexing completed with errors: {errors}", observed_generation=current_generation
             )
         else:
             conditions["AutoIndexerError"] = autoindexer_client._create_condition(
-                "AutoIndexerError", "False", "IndexingCompleted", "No errors during indexing"
+                "AutoIndexerError", "False", "IndexingCompleted", "No errors during indexing", observed_generation=current_generation
             )
             
         conditions["AutoIndexerFailed"] = autoindexer_client._create_condition(
-            "AutoIndexerFailed", "False", "IndexingCompleted", "Indexing completed successfully"
+            "AutoIndexerFailed", "False", "IndexingCompleted", "Indexing completed successfully", observed_generation=current_generation
         )
         conditions["AutoIndexerIndexing"] = autoindexer_client._create_condition(
-            "AutoIndexerIndexing", "False", "IndexingCompleted", "Document indexing process completed successfully"
+            "AutoIndexerIndexing", "False", "IndexingCompleted", "Document indexing process completed successfully", observed_generation=current_generation
         )
 
         # Update conditions

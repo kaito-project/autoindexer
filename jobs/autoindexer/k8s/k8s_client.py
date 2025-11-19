@@ -186,6 +186,8 @@ class AutoIndexerK8sClient:
             if "conditions" not in current["status"]:
                 current["status"]["conditions"] = []
             
+            observed_generation = current.get("metadata", {}).get("generation", 0)
+            
             # Create new condition
             now = datetime.now(UTC).isoformat().replace("+00:00", "Z")
             
@@ -196,13 +198,13 @@ class AutoIndexerK8sClient:
                 if condition.get("type") == condition_type:
                     # Update existing condition
                     transition_time = now if condition.get("status") != status else condition.get("lastTransitionTime", now)
-                    conditions[i] = self._create_condition(condition_type, status, reason, message, transition_time)
+                    conditions[i] = self._create_condition(condition_type, status, reason, message, last_transition_time=transition_time, observed_generation=observed_generation)
                     found = True
                     break
             
             if not found:
                 # Add new condition
-                new_condition = self._create_condition(condition_type, status, reason, message, now)
+                new_condition = self._create_condition(condition_type, status, reason, message, last_transition_time=now, observed_generation=observed_generation)
                 conditions.append(new_condition)
             
             # Update the status
@@ -222,7 +224,7 @@ class AutoIndexerK8sClient:
             logger.error(f"Failed to add condition to AutoIndexer: {e}")
             return False
 
-    def _create_condition(self, condition_type: str, status: str, reason: str, message: str, last_transition_time: str | None = None) -> dict[str, str]:
+    def _create_condition(self, condition_type: str, status: str, reason: str, message: str, last_transition_time: str | None = None, observed_generation: int | None = None) -> dict[str, str]:
         """
         Create a condition dictionary structure.
         
@@ -244,7 +246,8 @@ class AutoIndexerK8sClient:
             "status": status,
             "reason": reason,
             "message": message,
-            "lastTransitionTime": last_transition_time
+            "lastTransitionTime": last_transition_time,
+            "observedGeneration": observed_generation if observed_generation is not None else 0
         }
 
     def update_indexing_progress(self, total_documents: int) -> bool:
