@@ -118,7 +118,7 @@ func (r *DriftReconciler) triggerJob(ctx context.Context, result DriftDetectionR
 		AutoIndexer:        autoIndexer,
 		JobName:            jobName,
 		JobType:            "drift-remediation",
-		Image:              r.getImageConfig().GetImage(),
+		Image:              manifests.GetJobImageConfig().GetImage(),
 		ImagePullPolicy:    "Always",
 		ServiceAccountName: manifests.GenerateServiceAccountName(autoIndexer),
 	}

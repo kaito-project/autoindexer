@@ -18,6 +18,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"os"
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -62,6 +63,32 @@ type JobConfig struct {
 	ResourceLimits     *corev1.ResourceRequirements
 	ImagePullPolicy    corev1.PullPolicy
 	ServiceAccountName string // ServiceAccount for RBAC
+}
+
+type ImageConfig struct {
+	RegistryName string
+	ImageName    string
+	ImageTag     string
+}
+
+func (ic ImageConfig) GetImage() string {
+	return fmt.Sprintf("%s/%s:%s", ic.RegistryName, ic.ImageName, ic.ImageTag)
+}
+
+func GetJobImageConfig() ImageConfig {
+	return ImageConfig{
+		RegistryName: getEnv("PRESET_AUTO_INDEXER_REGISTRY_NAME", "mcr.microsoft.com/aks/kaito"),
+		ImageName:    getEnv("PRESET_AUTO_INDEXER_IMAGE_NAME", "kaito-autoindexer"),
+		ImageTag:     getEnv("PRESET_AUTO_INDEXER_IMAGE_TAG", "0.6.0"),
+	}
+}
+
+func getEnv(key, defaultValue string) string {
+	value := os.Getenv(key)
+	if value == "" {
+		return defaultValue
+	}
+	return value
 }
 
 // GenerateIndexingJobManifest creates a Job manifest for document indexing

@@ -351,7 +351,7 @@ func (r *AutoIndexerReconciler) ensureCronJob(ctx context.Context, autoIndexerOb
 		AutoIndexer:        autoIndexerObj,
 		JobName:            fmt.Sprintf("%s-cronjob", autoIndexerObj.Name),
 		JobType:            "scheduled-indexing",
-		Image:              getImageConfig().GetImage(),
+		Image:              manifests.GetJobImageConfig().GetImage(),
 		ImagePullPolicy:    "Always",
 		ServiceAccountName: manifests.GenerateServiceAccountName(autoIndexerObj),
 	}
@@ -392,7 +392,7 @@ func (r *AutoIndexerReconciler) ensureJob(ctx context.Context, autoIndexerObj *a
 		AutoIndexer:        autoIndexerObj,
 		JobName:            fmt.Sprintf("%s-job", autoIndexerObj.Name),
 		JobType:            "one-time-indexing",
-		Image:              getImageConfig().GetImage(),
+		Image:              manifests.GetJobImageConfig().GetImage(),
 		ImagePullPolicy:    "Always",
 		ServiceAccountName: manifests.GenerateServiceAccountName(autoIndexerObj),
 	}
@@ -523,32 +523,6 @@ func (d *driftDetectorRunnable) Start(ctx context.Context) error {
 // equalCronJobs compares two CronJob specs for equality
 func equalCronJobs(existing, desired *batchv1.CronJob) bool {
 	return reflect.DeepEqual(existing.Spec, desired.Spec)
-}
-
-type ImageConfig struct {
-	RegistryName string
-	ImageName    string
-	ImageTag     string
-}
-
-func (ic ImageConfig) GetImage() string {
-	return fmt.Sprintf("%s/%s:%s", ic.RegistryName, ic.ImageName, ic.ImageTag)
-}
-
-func getImageConfig() ImageConfig {
-	return ImageConfig{
-		RegistryName: getEnv("PRESET_AUTO_INDEXER_REGISTRY_NAME", "mcr.microsoft.com/aks/kaito"),
-		ImageName:    getEnv("PRESET_AUTO_INDEXER_IMAGE_NAME", "kaito-autoindexer"),
-		ImageTag:     getEnv("PRESET_AUTO_INDEXER_IMAGE_TAG", "0.6.0"),
-	}
-}
-
-func getEnv(key, defaultValue string) string {
-	value := os.Getenv(key)
-	if value == "" {
-		return defaultValue
-	}
-	return value
 }
 
 // hasOwnerReference checks if the resource has an owner reference to the given object
