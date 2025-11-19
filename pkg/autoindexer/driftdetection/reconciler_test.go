@@ -90,10 +90,6 @@ func TestDriftReconciler_TriggerJob_ScheduledAutoIndexer_Suspension(t *testing.T
 			t.Errorf("Expected drift-remediation-suspended annotation to be true")
 		}
 
-		if updatedAutoIndexer.Annotations["autoindexer.kaito.sh/original-suspend-state"] != "false" {
-			t.Errorf("Expected original-suspend-state annotation to be false")
-		}
-
 		// Verify job was created with drift remediation label
 		jobs := &batchv1.JobList{}
 		err = fakeClient.List(context.Background(), jobs, client.InNamespace("default"))

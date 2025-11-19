@@ -606,7 +606,7 @@ func (r *AutoIndexerReconciler) unsuspendAfterDriftRemediation(ctx context.Conte
 	existingAutoIndexerObj := autoIndexerObj.DeepCopy()
 
 	// Update the suspend state to the original value
-	if autoIndexerObj.Annotations["autoindexer.kaito.sh/drift-remediation-suspended"] != "true" {
+	if autoIndexerObj.Annotations["autoindexer.kaito.sh/drift-remediation-suspended"] == "true" {
 		suspend := false
 		autoIndexerObj.Spec.Suspend = &suspend
 		delete(autoIndexerObj.Annotations, "autoindexer.kaito.sh/drift-remediation-suspended")

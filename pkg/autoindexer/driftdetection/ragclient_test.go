@@ -46,7 +46,7 @@ func TestRAGEngineClient_GetDocumentCount_Success(t *testing.T) {
 	
 	// Create test server
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		assert.Equal(t, "/index/test-index/documents", r.URL.Path)
+		assert.Equal(t, "/indexes/test-index/documents", r.URL.Path)
 		assert.Equal(t, "1", r.URL.Query().Get("limit"))
 		assert.Equal(t, "0", r.URL.Query().Get("offset"))
 		assert.Contains(t, r.URL.Query().Get("metadata_filter"), `"autoindexer": "test-autoindexer"`)

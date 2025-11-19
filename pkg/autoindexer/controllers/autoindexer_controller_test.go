@@ -232,8 +232,8 @@ func TestAutoIndexerReconciler_HandleDriftRemediationJobCompletion(t *testing.T)
 				Name:      "test-autoindexer",
 				Namespace: "default",
 				Annotations: map[string]string{
+					"autoindexer.kaito.sh/drift-remediation":           "true",
 					"autoindexer.kaito.sh/drift-remediation-suspended": "true",
-					"autoindexer.kaito.sh/original-suspend-state":      "false",
 				},
 			},
 			Spec: autoindexerv1alpha1.AutoIndexerSpec{
@@ -297,10 +297,6 @@ func TestAutoIndexerReconciler_HandleDriftRemediationJobCompletion(t *testing.T)
 		// Verify annotations are removed
 		if updatedAutoIndexer.Annotations["autoindexer.kaito.sh/drift-remediation-suspended"] != "" {
 			t.Errorf("Expected drift-remediation-suspended annotation to be removed")
-		}
-
-		if updatedAutoIndexer.Annotations["autoindexer.kaito.sh/original-suspend-state"] != "" {
-			t.Errorf("Expected original-suspend-state annotation to be removed")
 		}
 	})
 
