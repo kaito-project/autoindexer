@@ -31,4 +31,10 @@ const (
 
 	// AutoIndexerConditionTypeError is the state when AutoIndexer has failed.
 	AutoIndexerConditionTypeError ConditionType = ConditionType("AutoIndexerError")
+
+	// AutoIndexerConditionTypeDriftDetected is the state when drift has been detected.
+	AutoIndexerConditionTypeDriftDetected ConditionType = ConditionType("DriftDetected")
+
+	// AutoIndexerConditionTypeDriftRemediation is the state when drift has been remediated.
+	AutoIndexerConditionTypeDriftRemediation ConditionType = ConditionType("DriftRemediation")
 )

@@ -105,10 +105,9 @@ az-patch-install-autoindexer-helm-e2e: ## Install Kaito AutoIndexer Helm chart f
 
 	yq -i '(.image.repository)                                              = "$(REGISTRY)/$(AUTOINDEXER_IMAGE_NAME)"' ./charts/kaito/autoindexer/values.yaml
 	yq -i '(.image.tag)                                                     = "latest"'                                ./charts/kaito/autoindexer/values.yaml
-	yq -i '(.clusterName)                                                   = "$(AZURE_CLUSTER_NAME)"'                 ./charts/kaito/autoindexer/values.yaml
-	yq -i '(.presetAutoIndexerRegistryName)                                 = "$(REGISTRY)"'                           ./charts/kaito/autoindexer/values.yaml
-	yq -i '(.presetAutoIndexerImageName)                                    = "$(AUTOINDEXER_JOB_IMG_NAME)"'           ./charts/kaito/autoindexer/values.yaml
-	yq -i '(.presetAutoIndexerImageTag)                                     = "$(AUTOINDEXER_JOB_IMG_TAG)"'            ./charts/kaito/autoindexer/values.yaml
+	yq -i '(.autoIndexerJobRegistryName)                                    = "$(REGISTRY)"'                           ./charts/kaito/autoindexer/values.yaml
+	yq -i '(.autoIndexerJobImageName)                                       = "$(AUTOINDEXER_JOB_IMG_NAME)"'           ./charts/kaito/autoindexer/values.yaml
+	yq -i '(.autoIndexerJobImageTag)                                        = "$(AUTOINDEXER_JOB_IMG_TAG)"'            ./charts/kaito/autoindexer/values.yaml
 
 	helm install kaito-autoindexer ./charts/kaito/autoindexer --namespace $(KAITO_AUTOINDEXER_NAMESPACE) --create-namespace $(HELM_INSTALL_EXTRA_ARGS)
 

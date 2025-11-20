@@ -309,10 +309,6 @@ spec:
                 description: SuccessfulIndexingCount tracks successful indexing runs
                 format: int32
                 type: integer
-            required:
-            - errorIndexingCount
-            - numOfDocumentInIndex
-            - successfulIndexingCount
             type: object
         type: object
     served: true
