@@ -81,15 +81,13 @@ func NewAutoIndexerReconciler(client client.Client, scheme *runtime.Scheme, log 
 		log.WithName("drift-detector"),
 	)
 
-	reconciler := &AutoIndexerReconciler{
+	return &AutoIndexerReconciler{
 		Client:        client,
 		Scheme:        scheme,
 		Log:           log,
 		Recorder:      recorder,
 		DriftDetector: driftDetector,
 	}
-
-	return reconciler
 }
 
 //+kubebuilder:rbac:groups=autoindexer.kaito.sh,resources=autoindexers,verbs=get;list;watch;update;patch
