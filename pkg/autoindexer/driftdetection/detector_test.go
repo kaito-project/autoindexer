@@ -40,11 +40,7 @@ func TestNewDriftDetector(t *testing.T) {
 	config := DefaultDriftDetectionConfig()
 	logger := logr.Discard()
 
-	reconcilerFunc := func(result DriftDetectionResult) error {
-		return nil
-	}
-
-	detector := NewDriftDetector(client, ragClient, config, logger, reconcilerFunc)
+	detector := NewDriftDetector(client, ragClient, config, logger)
 	assert.NotNil(t, detector)
 
 	impl, ok := detector.(*DriftDetectorImpl)
@@ -52,7 +48,6 @@ func TestNewDriftDetector(t *testing.T) {
 	assert.NotNil(t, impl.client)
 	assert.NotNil(t, impl.ragClient)
 	assert.Equal(t, config, impl.config)
-	assert.NotNil(t, impl.reconcilerFunc)
 }
 
 func TestDriftDetector_DetermineDriftAction(t *testing.T) {

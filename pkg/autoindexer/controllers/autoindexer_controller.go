@@ -48,18 +48,14 @@ const (
 // AutoIndexerReconciler reconciles an AutoIndexer object
 type AutoIndexerReconciler struct {
 	client.Client
-	Log             logr.Logger
-	Scheme          *runtime.Scheme
-	Recorder        record.EventRecorder
-	DriftDetector   driftdetection.DriftDetector
-	DriftReconciler *driftdetection.DriftReconciler
+	Log           logr.Logger
+	Scheme        *runtime.Scheme
+	Recorder      record.EventRecorder
+	DriftDetector driftdetection.DriftDetector
 }
 
 // NewAutoIndexerReconciler creates a new AutoIndexer reconciler
 func NewAutoIndexerReconciler(client client.Client, scheme *runtime.Scheme, log logr.Logger, recorder record.EventRecorder) *AutoIndexerReconciler {
-	// Create drift reconciler
-	driftReconciler := driftdetection.NewDriftReconciler(client, log.WithName("drift-reconciler"))
-
 	// Create drift detector
 	ragClient := driftdetection.NewRAGEngineClient(30*time.Second, 3)
 
@@ -77,31 +73,23 @@ func NewAutoIndexerReconciler(client client.Client, scheme *runtime.Scheme, log 
 		driftConfig.Enabled = false
 	}
 
-	reconciler := &AutoIndexerReconciler{
-		Client:          client,
-		Scheme:          scheme,
-		Log:             log,
-		Recorder:        recorder,
-		DriftReconciler: driftReconciler,
-	}
-
-	// Create drift detector with reconciler callback
+	// Create drift detector
 	driftDetector := driftdetection.NewDriftDetector(
 		client,
 		ragClient,
 		driftConfig,
 		log.WithName("drift-detector"),
-		reconciler.handleDriftResult,
 	)
 
-	reconciler.DriftDetector = driftDetector
+	reconciler := &AutoIndexerReconciler{
+		Client:        client,
+		Scheme:        scheme,
+		Log:           log,
+		Recorder:      recorder,
+		DriftDetector: driftDetector,
+	}
 
 	return reconciler
-}
-
-// handleDriftResult handles drift detection results
-func (r *AutoIndexerReconciler) handleDriftResult(result driftdetection.DriftDetectionResult) error {
-	return r.DriftReconciler.ReconcileDrift(result)
 }
 
 //+kubebuilder:rbac:groups=autoindexer.kaito.sh,resources=autoindexers,verbs=get;list;watch;update;patch
@@ -198,18 +186,24 @@ func (r *AutoIndexerReconciler) addAutoIndexer(ctx context.Context, autoIndexerO
 		}
 	}
 
-	r.Log.Info("AutoIndexer resources are ready", "AutoIndexer", autoIndexerObj.Name, "namespace", autoIndexerObj.Namespace)
-	if err := r.updateStatusConditionIfNotMatch(ctx, autoIndexerObj, autoindexerv1alpha1.ConditionTypeResourceStatus, metav1.ConditionTrue,
-		"autoIndexerResourceStatusSuccess", "autoindexer resources are ready"); err != nil {
-		r.Log.Error(err, "failed to update autoindexer status", "autoindexer", autoIndexerObj.Name)
-		// Don't return error here as the main reconciliation succeeded
+	r.Log.Info("Checking if drift remediation job need to be created", "AutoIndexer", autoIndexerObj.Name, "namespace", autoIndexerObj.Namespace)
+	if err := r.handleDriftRemediationJobCreation(ctx, autoIndexerObj); err != nil {
+		r.Log.Error(err, "failed to handle drift remediation job creation", "autoindexer", autoIndexerObj.Name)
+		return ctrl.Result{}, err
 	}
 
 	// Check for completed drift remediation jobs and unsuspend if necessary
 	r.Log.Info("Checking for completed drift remediation jobs and unsuspending if necessary", "AutoIndexer", autoIndexerObj.Name, "namespace", autoIndexerObj.Namespace)
 	if err := r.handleDriftRemediationJobCompletion(ctx, autoIndexerObj); err != nil {
 		r.Log.Error(err, "failed to handle drift remediation job completion", "autoindexer", autoIndexerObj.Name)
-		// Log error but don't fail the reconciliation
+		return ctrl.Result{}, err
+	}
+
+	r.Log.Info("AutoIndexer resources are ready", "AutoIndexer", autoIndexerObj.Name, "namespace", autoIndexerObj.Namespace)
+	if err := r.updateStatusConditionIfNotMatch(ctx, autoIndexerObj, autoindexerv1alpha1.ConditionTypeResourceStatus, metav1.ConditionTrue,
+		"autoIndexerResourceStatusSuccess", "autoindexer resources are ready"); err != nil {
+		r.Log.Error(err, "failed to update autoindexer status", "autoindexer", autoIndexerObj.Name)
+		// Don't return error here as the main reconciliation succeeded
 	}
 
 	return ctrl.Result{}, nil
@@ -535,6 +529,185 @@ func hasOwnerReference(obj metav1.Object, owner metav1.Object) bool {
 	return false
 }
 
+func (r *AutoIndexerReconciler) handleDriftRemediationJobCreation(ctx context.Context, autoIndexer *autoindexerv1alpha1.AutoIndexer) error {
+	// Only check if this AutoIndexer was in drift remediation
+	if autoIndexer.Annotations["autoindexer.kaito.sh/drift-remediation"] != "true" {
+		return nil
+	}
+
+	// If a drift remediation job was already created, skip creating another one
+	if autoIndexer.Annotations["autoindexer.kaito.sh/drift-remediation-created"] == "true" {
+		return nil
+	}
+
+	if autoIndexer.Annotations == nil {
+		autoIndexer.Annotations = make(map[string]string)
+	}
+	autoIndexer.Annotations["autoindexer.kaito.sh/drift-remediation-created"] = "true"
+
+	// For scheduled AutoIndexers, suspend them during drift remediation
+	var originalSuspendState bool
+	if autoIndexer.Spec.Schedule != nil {
+		// Store original suspend state
+		if autoIndexer.Spec.Suspend != nil {
+			originalSuspendState = *autoIndexer.Spec.Suspend
+		} else {
+			originalSuspendState = false
+		}
+
+		// Only suspend if not already suspended
+		if !originalSuspendState {
+			suspend := true
+			autoIndexer.Spec.Suspend = &suspend
+
+			// Add annotation to track the original state and that we need to unsuspend after remediation
+			autoIndexer.Annotations["autoindexer.kaito.sh/drift-remediation-suspended"] = "true"
+			r.Log.Info("Suspended AutoIndexer for drift remediation",
+				"autoindexer", autoIndexer.Name,
+				"namespace", autoIndexer.Namespace,
+				"original-suspend-state", originalSuspendState)
+		}
+	}
+
+	// Update the AutoIndexer to add annotations and suspend if needed
+	if err := r.Client.Update(ctx, autoIndexer); err != nil {
+		return fmt.Errorf("failed to update AutoIndexer during drift remediation: %w", err)
+	}
+
+	// Generate a unique job name with timestamp
+	timestamp := time.Now().Format("20060102-150405")
+	jobName := fmt.Sprintf("%s-drift-remediation-%s", autoIndexer.Name, timestamp)
+
+	// Generate the Job manifest
+	config := manifests.JobConfig{
+		AutoIndexer:        autoIndexer,
+		JobName:            jobName,
+		JobType:            "drift-remediation",
+		Image:              manifests.GetJobImageConfig().GetImage(),
+		ImagePullPolicy:    "Always",
+		ServiceAccountName: manifests.GenerateServiceAccountName(autoIndexer),
+	}
+
+	job := manifests.GenerateIndexingJobManifest(config)
+
+	// Add drift remediation specific labels
+	if job.Labels == nil {
+		job.Labels = make(map[string]string)
+	}
+	job.Labels["autoindexer.kaito.sh/drift-remediation"] = "true"
+
+	// Add the same labels to the pod template
+	if job.Spec.Template.Labels == nil {
+		job.Spec.Template.Labels = make(map[string]string)
+	}
+	job.Spec.Template.Labels["autoindexer.kaito.sh/drift-remediation"] = "true"
+
+	// Set the AutoIndexer as the owner of the Job
+	if err := controllerutil.SetControllerReference(autoIndexer, job, r.Client.Scheme()); err != nil {
+		return fmt.Errorf("failed to set controller reference: %w", err)
+	}
+
+	// Create the job
+	if err := r.Client.Create(ctx, job); err != nil {
+		return fmt.Errorf("failed to create drift remediation job: %w", err)
+	}
+
+	r.Log.Info("Created drift remediation job",
+		"job", jobName,
+		"autoindexer", autoIndexer.Name,
+		"namespace", autoIndexer.Namespace)
+
+	// Update the AutoIndexer status to indicate drift remediation (best effort)
+	if err := r.updateStatusWithDriftRemediation(ctx, autoIndexer); err != nil {
+		r.Log.Error(err, "failed to update AutoIndexer status for drift remediation, but job creation succeeded",
+			"autoindexer", autoIndexer.Name,
+			"namespace", autoIndexer.Namespace)
+		// Don't fail the whole operation if only the status update fails
+	}
+
+	return nil
+}
+
+// updateStatusWithDriftRemediation updates the status for drift remediation jobs
+func (r *AutoIndexerReconciler) updateStatusWithDriftRemediation(ctx context.Context, autoIndexer *autoindexerv1alpha1.AutoIndexer) error {
+	// Refetch the AutoIndexer to get the latest version after spec updates
+	freshAutoIndexer := &autoindexerv1alpha1.AutoIndexer{}
+	if err := r.Client.Get(ctx, types.NamespacedName{
+		Name:      autoIndexer.Name,
+		Namespace: autoIndexer.Namespace,
+	}, freshAutoIndexer); err != nil {
+		return fmt.Errorf("failed to get fresh AutoIndexer for status update: %w", err)
+	}
+
+	existingFreshAutoIndexer := freshAutoIndexer.DeepCopy()
+
+	// Update indexing phase to indicate drift remediation
+	freshAutoIndexer.Status.IndexingPhase = autoindexerv1alpha1.AutoIndexerPhaseRunning
+
+	// Add drift remediation condition
+	r.addDriftRemediationCondition(freshAutoIndexer)
+	r.updateDriftCondition(freshAutoIndexer)
+
+	// Update the status
+	if err := r.Client.Status().Patch(ctx, freshAutoIndexer, client.MergeFrom(existingFreshAutoIndexer)); err != nil {
+		return fmt.Errorf("failed to update AutoIndexer status for drift remediation: %w", err)
+	}
+
+	return nil
+}
+
+// updateDriftCondition adds or updates the drift detection condition
+func (r *AutoIndexerReconciler) updateDriftCondition(autoIndexer *autoindexerv1alpha1.AutoIndexer) {
+	condition := metav1.Condition{
+		Type:               string(autoindexerv1alpha1.AutoIndexerConditionTypeDriftDetected),
+		Status:             metav1.ConditionTrue,
+		LastTransitionTime: metav1.Now(),
+		Reason:             "DocumentCountMismatch",
+		Message:            fmt.Sprintf("Document count drift detected"),
+		ObservedGeneration: autoIndexer.Generation,
+	}
+
+	// Find and update existing condition or append new one
+	updated := false
+	for i := range autoIndexer.Status.Conditions {
+		if autoIndexer.Status.Conditions[i].Type == condition.Type {
+			autoIndexer.Status.Conditions[i] = condition
+			updated = true
+			break
+		}
+	}
+
+	if !updated {
+		autoIndexer.Status.Conditions = append(autoIndexer.Status.Conditions, condition)
+	}
+}
+
+// addDriftRemediationCondition adds a condition indicating drift remediation is in progress
+func (r *AutoIndexerReconciler) addDriftRemediationCondition(autoIndexer *autoindexerv1alpha1.AutoIndexer) {
+	condition := metav1.Condition{
+		Type:               string(autoindexerv1alpha1.AutoIndexerConditionTypeDriftRemediation),
+		Status:             metav1.ConditionTrue,
+		LastTransitionTime: metav1.Now(),
+		Reason:             "RemediationJobCreated",
+		Message:            fmt.Sprintf("Drift remediation job created due to document count mismatch"),
+		ObservedGeneration: autoIndexer.Generation,
+	}
+
+	// Find and update existing condition or append new one
+	updated := false
+	for i := range autoIndexer.Status.Conditions {
+		if autoIndexer.Status.Conditions[i].Type == condition.Type {
+			autoIndexer.Status.Conditions[i] = condition
+			updated = true
+			break
+		}
+	}
+
+	if !updated {
+		autoIndexer.Status.Conditions = append(autoIndexer.Status.Conditions, condition)
+	}
+}
+
 // handleDriftRemediationJobCompletion checks for completed drift remediation jobs and unsuspends the AutoIndexer if necessary
 func (r *AutoIndexerReconciler) handleDriftRemediationJobCompletion(ctx context.Context, autoIndexerObj *autoindexerv1alpha1.AutoIndexer) error {
 	// Only check if this AutoIndexer was in drift remediation
@@ -589,6 +762,7 @@ func (r *AutoIndexerReconciler) unsuspendAfterDriftRemediation(ctx context.Conte
 	// Remove the drift remediation annotations
 	if autoIndexerObj.Annotations != nil {
 		delete(autoIndexerObj.Annotations, "autoindexer.kaito.sh/drift-remediation")
+		delete(autoIndexerObj.Annotations, "autoindexer.kaito.sh/drift-remediation-created")
 	}
 
 	// Update the AutoIndexer

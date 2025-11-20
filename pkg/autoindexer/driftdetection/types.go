@@ -87,11 +87,10 @@ type DriftDetectionResult struct {
 
 // DriftDetectorImpl implements the DriftDetector interface
 type DriftDetectorImpl struct {
-	client         client.Client
-	ragClient      RAGEngineClient
-	config         DriftDetectionConfig
-	logger         logr.Logger
-	stopCh         chan struct{}
-	ticker         *time.Ticker
-	reconcilerFunc func(result DriftDetectionResult) error
+	client    client.Client
+	ragClient RAGEngineClient
+	config    DriftDetectionConfig
+	logger    logr.Logger
+	stopCh    chan struct{}
+	ticker    *time.Ticker
 }

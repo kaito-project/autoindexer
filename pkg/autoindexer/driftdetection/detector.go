@@ -30,15 +30,13 @@ func NewDriftDetector(
 	ragClient RAGEngineClient,
 	config DriftDetectionConfig,
 	logger logr.Logger,
-	reconcilerFunc func(result DriftDetectionResult) error,
 ) DriftDetector {
 	return &DriftDetectorImpl{
-		client:         client,
-		ragClient:      ragClient,
-		config:         config,
-		logger:         logger,
-		stopCh:         make(chan struct{}),
-		reconcilerFunc: reconcilerFunc,
+		client:    client,
+		ragClient: ragClient,
+		config:    config,
+		logger:    logger,
+		stopCh:    make(chan struct{}),
 	}
 }
 
@@ -133,9 +131,9 @@ func (d *DriftDetectorImpl) performDriftCheck() {
 		}
 
 		// Call the reconciler function if drift is detected
-		if result.DriftDetected && d.reconcilerFunc != nil {
-			if err := d.reconcilerFunc(result); err != nil {
-				d.logger.Error(err, "Failed to handle drift",
+		if result.DriftDetected {
+			if err := d.addDriftRemediationAnnotationToAutoIndexer(ctx, &autoIndexer); err != nil {
+				d.logger.Error(err, "Failed to add drift remediation annotation to AutoIndexer",
 					"autoindexer", result.AutoIndexerName,
 					"namespace", result.AutoIndexerNamespace)
 			}
@@ -220,4 +218,17 @@ func (d *DriftDetectorImpl) isAutoIndexerInStableState(autoIndexer *autoindexerv
 func (d *DriftDetectorImpl) determineDriftAction(autoIndexer *autoindexerv1alpha1.AutoIndexer) DriftAction {
 	// Create a job to remediate drift
 	return DriftActionTriggerJob
+}
+
+func (d *DriftDetectorImpl) addDriftRemediationAnnotationToAutoIndexer(ctx context.Context, autoIndexer *autoindexerv1alpha1.AutoIndexer) error {
+	// Add annotation to indicate drift remediation is in progress
+	if autoIndexer.Annotations == nil {
+		autoIndexer.Annotations = make(map[string]string)
+	}
+	autoIndexer.Annotations["autoindexer.kaito.sh/drift-remediation"] = "true"
+	err := d.client.Update(ctx, autoIndexer)
+	if err != nil {
+		return fmt.Errorf("failed to add drift remediation annotation to AutoIndexer: %w", err)
+	}
+	return nil
 }
