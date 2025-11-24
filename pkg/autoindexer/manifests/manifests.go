@@ -239,7 +239,7 @@ func generateDataSourceConfig(dataSource v1alpha1.DataSourceSpec) (string, error
 	}
 
 	switch dataSource.Type {
-	case v1alpha1.DataSourceTypeGitHub:
+	case v1alpha1.DataSourceTypeGit:
 		if dataSource.Git != nil {
 			config["git"] = map[string]interface{}{
 				"repository":   dataSource.Git.Repository,

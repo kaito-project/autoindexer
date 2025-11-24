@@ -25,6 +25,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
@@ -65,7 +66,7 @@ func TestAutoIndexerReconciler_Reconcile(t *testing.T) {
 			RAGEngine: "test-ragengine",
 			IndexName: "test-index",
 			DataSource: autoindexerv1alpha1.DataSourceSpec{
-				Type: autoindexerv1alpha1.DataSourceTypeGitHub,
+				Type: autoindexerv1alpha1.DataSourceTypeGit,
 				Git: &autoindexerv1alpha1.GitDataSourceSpec{
 					Repository: "https://github.com/example/repo",
 				},
@@ -108,9 +109,26 @@ func TestAutoIndexerReconciler_Reconcile(t *testing.T) {
 		t.Fatalf("Failed to get updated AutoIndexer: %v", err)
 	}
 
-	// Verify at least one condition was set during reconciliation
-	if len(updatedAutoIndexer.Status.Conditions) == 0 {
-		t.Error("Expected status conditions to be set during reconciliation")
+	// Verify phase set to pending
+	if updatedAutoIndexer.Status.IndexingPhase != autoindexerv1alpha1.AutoIndexerPhasePending {
+		t.Error("phase should have been updated to pending during reconciliation")
+	}
+
+	// should reconcile again to get resources created
+	result, err = reconciler.Reconcile(ctx, req)
+	if err != nil {
+		t.Fatalf("Reconcile failed: %v", err)
+	}
+
+	updatedAutoIndexer = &autoindexerv1alpha1.AutoIndexer{}
+	err = client.Get(ctx, req.NamespacedName, updatedAutoIndexer)
+	if err != nil {
+		t.Fatalf("Failed to get updated AutoIndexer: %v", err)
+	}
+
+	// Verify phase set to running with successful reconciliation
+	if updatedAutoIndexer.Status.IndexingPhase != autoindexerv1alpha1.AutoIndexerPhaseRunning {
+		t.Error("phase should have been updated to running during reconciliation")
 	}
 }
 
@@ -163,270 +181,207 @@ func TestAutoIndexerReconciler_deleteAutoIndexer(t *testing.T) {
 	}
 }
 
-func TestAutoIndexerReconciler_updateStatusConditionIfNotMatch(t *testing.T) {
-	scheme := runtime.NewScheme()
-	_ = kaitov1alpha1.AddToScheme(scheme)
-	_ = autoindexerv1alpha1.AddToScheme(scheme)
-	_ = corev1.AddToScheme(scheme)
-	_ = rbacv1.AddToScheme(scheme)
-
-	autoIndexer := &autoindexerv1alpha1.AutoIndexer{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "test-autoindexer",
-			Namespace: "default",
-		},
-		Status: autoindexerv1alpha1.AutoIndexerStatus{
-			Conditions: []metav1.Condition{},
-		},
-	}
-
-	client := fake.NewClientBuilder().
-		WithScheme(scheme).
-		WithObjects(autoIndexer).
-		WithStatusSubresource(&autoindexerv1alpha1.AutoIndexer{}).
-		Build()
-
-	recorder := record.NewFakeRecorder(10)
-	reconciler := NewAutoIndexerReconciler(client, scheme, logr.Discard(), recorder)
-
-	ctx := context.Background()
-
-	// Test adding a new condition
-	err := reconciler.updateStatusConditionIfNotMatch(ctx, autoIndexer, autoindexerv1alpha1.AutoIndexerConditionTypeSucceeded, metav1.ConditionTrue, "TestReason", "Test message")
-	if err != nil {
-		t.Fatalf("updateStatusConditionIfNotMatch failed: %v", err)
-	}
-
-	// Verify condition was added
-	if len(autoIndexer.Status.Conditions) != 1 {
-		t.Fatalf("Expected 1 condition, got %d", len(autoIndexer.Status.Conditions))
-	}
-
-	condition := autoIndexer.Status.Conditions[0]
-	if condition.Type != string(autoindexerv1alpha1.AutoIndexerConditionTypeSucceeded) {
-		t.Errorf("Expected condition type %s, got %s", autoindexerv1alpha1.AutoIndexerConditionTypeSucceeded, condition.Type)
-	}
-	if condition.Status != metav1.ConditionTrue {
-		t.Errorf("Expected condition status True, got %s", condition.Status)
-	}
-	if condition.Reason != "TestReason" {
-		t.Errorf("Expected condition reason TestReason, got %s", condition.Reason)
-	}
-	if condition.Message != "Test message" {
-		t.Errorf("Expected condition message 'Test message', got %s", condition.Message)
-	}
-}
-
-func TestAutoIndexerReconciler_HandleDriftRemediationJobCompletion(t *testing.T) {
+func TestAutoIndexerReconciler_ValidateAndCorrectPhase(t *testing.T) {
 	scheme := runtime.NewScheme()
 	_ = autoindexerv1alpha1.AddToScheme(scheme)
 	_ = batchv1.AddToScheme(scheme)
 
-	t.Run("unsuspend_after_drift_remediation_completion", func(t *testing.T) {
-		schedule := "0 0 * * *"
-		suspend := true
-
-		// Create AutoIndexer that was suspended for drift remediation
-		autoIndexer := &autoindexerv1alpha1.AutoIndexer{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      "test-autoindexer",
-				Namespace: "default",
-				Annotations: map[string]string{
-					"autoindexer.kaito.sh/drift-remediation":           "true",
-					"autoindexer.kaito.sh/drift-remediation-suspended": "true",
+	tests := []struct {
+		name                string
+		autoIndexer         *autoindexerv1alpha1.AutoIndexer
+		jobs                []batchv1.Job
+		expectedPhaseChange bool
+		expectedPhase       autoindexerv1alpha1.AutoIndexerPhase
+	}{
+		{
+			name: "no change for drift remediation phase",
+			autoIndexer: &autoindexerv1alpha1.AutoIndexer{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test",
+					Namespace: "default",
+					UID:       "test-uid-1",
+				},
+				Status: autoindexerv1alpha1.AutoIndexerStatus{
+					IndexingPhase: autoindexerv1alpha1.AutoIndexerPhaseDriftRemediation,
 				},
 			},
-			Spec: autoindexerv1alpha1.AutoIndexerSpec{
-				RAGEngine: "test-rag",
-				IndexName: "test-index",
-				Schedule:  &schedule,
-				Suspend:   &suspend, // Currently suspended
-				DataSource: autoindexerv1alpha1.DataSourceSpec{
-					Type: autoindexerv1alpha1.DataSourceTypeGitHub,
-					Git: &autoindexerv1alpha1.GitDataSourceSpec{
-						Repository: "test/repo",
-						Branch:     "main",
+			expectedPhaseChange: false,
+		},
+		{
+			name: "correct phase to running when jobs are running",
+			autoIndexer: &autoindexerv1alpha1.AutoIndexer{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test",
+					Namespace: "default",
+					UID:       "test-uid-2",
+				},
+				Status: autoindexerv1alpha1.AutoIndexerStatus{
+					IndexingPhase: autoindexerv1alpha1.AutoIndexerPhaseCompleted,
+				},
+			},
+			jobs: []batchv1.Job{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-job",
+						Namespace: "default",
+						Labels: map[string]string{
+							"autoindexer.kaito.sh/name": "test",
+						},
 					},
+					Status: batchv1.JobStatus{Active: 1}, // Running
 				},
 			},
-		}
+			expectedPhaseChange: true,
+			expectedPhase:       autoindexerv1alpha1.AutoIndexerPhaseRunning,
+		},
+	}
 
-		// Create a completed drift remediation job
-		completedJob := &batchv1.Job{
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			objs := []client.Object{tt.autoIndexer}
+			for i := range tt.jobs {
+				objs = append(objs, &tt.jobs[i])
+			}
+
+			client := fake.NewClientBuilder().WithScheme(scheme).WithObjects(objs...).WithStatusSubresource(tt.autoIndexer).Build()
+			reconciler := &AutoIndexerReconciler{
+				Client: client,
+				Log:    logr.Discard(),
+				Scheme: scheme,
+			}
+
+			ctx := context.Background()
+			changed, err := reconciler.validateAndCorrectPhase(ctx, tt.autoIndexer)
+
+			if err != nil {
+				t.Fatalf("validateAndCorrectPhase failed: %v", err)
+			}
+
+			if changed != tt.expectedPhaseChange {
+				t.Errorf("Expected phase change %v, got %v", tt.expectedPhaseChange, changed)
+			}
+
+			// Fetch the updated object from the client to check the phase
+			if tt.expectedPhaseChange {
+				if tt.autoIndexer.Status.IndexingPhase != tt.expectedPhase {
+					t.Errorf("Expected phase %s, got %s", tt.expectedPhase, tt.autoIndexer.Status.IndexingPhase)
+				}
+			}
+		})
+	}
+}
+
+func TestAutoIndexerReconciler_GetJobStatus(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = autoindexerv1alpha1.AddToScheme(scheme)
+	_ = batchv1.AddToScheme(scheme)
+
+	autoIndexer := &autoindexerv1alpha1.AutoIndexer{
+		ObjectMeta: metav1.ObjectMeta{Name: "test", Namespace: "default"},
+	}
+
+	jobs := []batchv1.Job{
+		{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      "test-autoindexer-drift-remediation-123",
+				Name:      "running-job",
 				Namespace: "default",
 				Labels: map[string]string{
-					"autoindexer.kaito.sh/name":              "test-autoindexer",
-					"autoindexer.kaito.sh/drift-remediation": "true",
-				},
-				OwnerReferences: []metav1.OwnerReference{
-					*metav1.NewControllerRef(autoIndexer, autoindexerv1alpha1.GroupVersion.WithKind("AutoIndexer")),
+					"autoindexer.kaito.sh/name": "test",
 				},
 			},
-			Status: batchv1.JobStatus{
-				Succeeded: 1, // Job completed successfully
-			},
-		}
-
-		fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(autoIndexer, completedJob).Build()
-		reconciler := &AutoIndexerReconciler{
-			Client: fakeClient,
-			Log:    logr.Discard(),
-		}
-
-		err := reconciler.handleDriftRemediationJobCompletion(context.Background(), autoIndexer)
-		if err != nil {
-			t.Fatalf("handleDriftRemediationJobCompletion failed: %v", err)
-		}
-
-		// Verify AutoIndexer is unsuspended
-		var updatedAutoIndexer autoindexerv1alpha1.AutoIndexer
-		err = fakeClient.Get(context.Background(), types.NamespacedName{
-			Name:      "test-autoindexer",
-			Namespace: "default",
-		}, &updatedAutoIndexer)
-		if err != nil {
-			t.Fatalf("Failed to get updated AutoIndexer: %v", err)
-		}
-
-		if updatedAutoIndexer.Spec.Suspend == nil || *updatedAutoIndexer.Spec.Suspend {
-			t.Errorf("Expected AutoIndexer to be unsuspended, but Suspend is %v", updatedAutoIndexer.Spec.Suspend)
-		}
-
-		// Verify annotations are removed
-		if updatedAutoIndexer.Annotations["autoindexer.kaito.sh/drift-remediation-suspended"] != "" {
-			t.Errorf("Expected drift-remediation-suspended annotation to be removed")
-		}
-	})
-
-	t.Run("dont_unsuspend_if_jobs_still_running", func(t *testing.T) {
-		schedule := "0 0 * * *"
-		suspend := true
-
-		// Create AutoIndexer that was suspended for drift remediation
-		autoIndexer := &autoindexerv1alpha1.AutoIndexer{
+			Status: batchv1.JobStatus{Active: 1},
+		},
+		{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      "test-autoindexer",
-				Namespace: "default",
-				Annotations: map[string]string{
-					"autoindexer.kaito.sh/drift-remediation-suspended": "true",
-					"autoindexer.kaito.sh/original-suspend-state":      "false",
-				},
-			},
-			Spec: autoindexerv1alpha1.AutoIndexerSpec{
-				RAGEngine: "test-rag",
-				IndexName: "test-index",
-				Schedule:  &schedule,
-				Suspend:   &suspend, // Currently suspended
-				DataSource: autoindexerv1alpha1.DataSourceSpec{
-					Type: autoindexerv1alpha1.DataSourceTypeGitHub,
-					Git: &autoindexerv1alpha1.GitDataSourceSpec{
-						Repository: "test/repo",
-						Branch:     "main",
-					},
-				},
-			},
-		}
-
-		// Create a running drift remediation job (not completed)
-		runningJob := &batchv1.Job{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      "test-autoindexer-drift-remediation-123",
+				Name:      "failed-job",
 				Namespace: "default",
 				Labels: map[string]string{
-					"autoindexer.kaito.sh/name":              "test-autoindexer",
-					"autoindexer.kaito.sh/drift-remediation": "true",
-				},
-				OwnerReferences: []metav1.OwnerReference{
-					*metav1.NewControllerRef(autoIndexer, autoindexerv1alpha1.GroupVersion.WithKind("AutoIndexer")),
+					"autoindexer.kaito.sh/name": "test",
 				},
 			},
-			Status: batchv1.JobStatus{
-				// No Succeeded or Failed - job is still running
-			},
-		}
-
-		fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(autoIndexer, runningJob).Build()
-		reconciler := &AutoIndexerReconciler{
-			Client: fakeClient,
-			Log:    logr.Discard(),
-		}
-
-		err := reconciler.handleDriftRemediationJobCompletion(context.Background(), autoIndexer)
-		if err != nil {
-			t.Fatalf("handleDriftRemediationJobCompletion failed: %v", err)
-		}
-
-		// Verify AutoIndexer remains suspended since job is still running
-		var updatedAutoIndexer autoindexerv1alpha1.AutoIndexer
-		err = fakeClient.Get(context.Background(), types.NamespacedName{
-			Name:      "test-autoindexer",
-			Namespace: "default",
-		}, &updatedAutoIndexer)
-		if err != nil {
-			t.Fatalf("Failed to get updated AutoIndexer: %v", err)
-		}
-
-		if updatedAutoIndexer.Spec.Suspend == nil || !*updatedAutoIndexer.Spec.Suspend {
-			t.Errorf("Expected AutoIndexer to remain suspended while jobs are running, but Suspend is %v", updatedAutoIndexer.Spec.Suspend)
-		}
-
-		// Verify annotations remain
-		if updatedAutoIndexer.Annotations["autoindexer.kaito.sh/drift-remediation-suspended"] != "true" {
-			t.Errorf("Expected drift-remediation-suspended annotation to remain while jobs are running")
-		}
-	})
-
-	t.Run("no_action_if_not_suspended_for_drift_remediation", func(t *testing.T) {
-		schedule := "0 0 * * *"
-
-		// Create AutoIndexer that was NOT suspended for drift remediation
-		autoIndexer := &autoindexerv1alpha1.AutoIndexer{
+			Status: batchv1.JobStatus{Failed: 1},
+		},
+		{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      "test-autoindexer",
+				Name:      "completed-job",
 				Namespace: "default",
-				// No drift remediation annotations
-			},
-			Spec: autoindexerv1alpha1.AutoIndexerSpec{
-				RAGEngine: "test-rag",
-				IndexName: "test-index",
-				Schedule:  &schedule,
-				// Not suspended
-				DataSource: autoindexerv1alpha1.DataSourceSpec{
-					Type: autoindexerv1alpha1.DataSourceTypeGitHub,
-					Git: &autoindexerv1alpha1.GitDataSourceSpec{
-						Repository: "test/repo",
-						Branch:     "main",
-					},
+				Labels: map[string]string{
+					"autoindexer.kaito.sh/name": "test",
 				},
 			},
-		}
+			Status: batchv1.JobStatus{Succeeded: 1},
+		},
+	}
 
-		fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(autoIndexer).Build()
-		reconciler := &AutoIndexerReconciler{
-			Client: fakeClient,
-			Log:    logr.Discard(),
-		}
+	objs := []client.Object{autoIndexer}
+	for i := range jobs {
+		objs = append(objs, &jobs[i])
+	}
 
-		err := reconciler.handleDriftRemediationJobCompletion(context.Background(), autoIndexer)
-		if err != nil {
-			t.Fatalf("handleDriftRemediationJobCompletion failed: %v", err)
-		}
+	client := fake.NewClientBuilder().WithScheme(scheme).WithObjects(objs...).Build()
+	reconciler := &AutoIndexerReconciler{
+		Client: client,
+		Log:    logr.Discard(),
+		Scheme: scheme,
+	}
 
-		// Verify nothing changed since it wasn't suspended for drift remediation
-		var updatedAutoIndexer autoindexerv1alpha1.AutoIndexer
-		err = fakeClient.Get(context.Background(), types.NamespacedName{
-			Name:      "test-autoindexer",
+	ctx := context.Background()
+	running, failed, completed, err := reconciler.getJobStatus(ctx, autoIndexer)
+
+	if err != nil {
+		t.Fatalf("getJobStatus failed: %v", err)
+	}
+
+	if running != 1 {
+		t.Errorf("Expected 1 running job, got %d", running)
+	}
+	if failed != 1 {
+		t.Errorf("Expected 1 failed job, got %d", failed)
+	}
+	if completed != 1 {
+		t.Errorf("Expected 1 completed job, got %d", completed)
+	}
+}
+
+func TestAutoIndexerReconciler_UpdateStatus(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = autoindexerv1alpha1.AddToScheme(scheme)
+
+	autoIndexer := &autoindexerv1alpha1.AutoIndexer{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test",
 			Namespace: "default",
-		}, &updatedAutoIndexer)
-		if err != nil {
-			t.Fatalf("Failed to get updated AutoIndexer: %v", err)
-		}
+			UID:       "test-uid",
+		},
+		Status: autoindexerv1alpha1.AutoIndexerStatus{
+			IndexingPhase: autoindexerv1alpha1.AutoIndexerPhasePending,
+		},
+	}
 
-		// Should remain not suspended
-		if updatedAutoIndexer.Spec.Suspend != nil && *updatedAutoIndexer.Spec.Suspend {
-			t.Errorf("Expected AutoIndexer to remain unsuspended, but Suspend is %v", updatedAutoIndexer.Spec.Suspend)
-		}
-	})
+	fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(autoIndexer).WithStatusSubresource(autoIndexer).Build()
+
+	ctx := context.Background()
+
+	// Test the equivalent of updateStatus method but simplified to just test phase change
+	if autoIndexer.Status.IndexingPhase == autoindexerv1alpha1.AutoIndexerPhaseRunning {
+		t.Error("Phase should not already be Running")
+	}
+
+	existingAutoIndexerObj := autoIndexer.DeepCopy()
+	autoIndexer.Status.IndexingPhase = autoindexerv1alpha1.AutoIndexerPhaseRunning
+
+	if err := fakeClient.Status().Patch(ctx, autoIndexer, client.MergeFrom(existingAutoIndexerObj)); err != nil {
+		t.Fatalf("Failed to update phase: %v", err)
+	}
+
+	// Fetch the updated object from the client to check the phase
+	updatedAutoIndexer := &autoindexerv1alpha1.AutoIndexer{}
+	err := fakeClient.Get(ctx, types.NamespacedName{Name: autoIndexer.Name, Namespace: autoIndexer.Namespace}, updatedAutoIndexer)
+	if err != nil {
+		t.Fatalf("Failed to get updated AutoIndexer: %v", err)
+	}
+
+	if updatedAutoIndexer.Status.IndexingPhase != autoindexerv1alpha1.AutoIndexerPhaseRunning {
+		t.Errorf("Expected phase Running, got %s", updatedAutoIndexer.Status.IndexingPhase)
+	}
 }

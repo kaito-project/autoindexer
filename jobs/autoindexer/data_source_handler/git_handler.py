@@ -75,7 +75,6 @@ class GitDataSourceHandler(DataSourceHandler):
         self.exclude_matcher = None
         self.include_matcher = None
         self.last_indexed_commit = self.config.get("lastIndexedCommit", "")
-        self.is_drift_remediation_run = self.config.get("driftRemediationRun", False)
         
         factory = get_factory(MatcherImplementation.PURE_PYTHON)
         if self.exclude_paths:
@@ -115,11 +114,7 @@ class GitDataSourceHandler(DataSourceHandler):
             self._setup_repository()
             
             # Determine indexing strategy based on configuration
-            if self.is_drift_remediation_run:
-                # Drift remediation run - re-index all files against whats in RAG
-                logger.info("Drift remediation run - re-indexing all files against whats in RAG")
-                self._drift_remediation()
-            elif self.commit:
+            if self.commit:
                 # Specific commit requested - index all files at that commit
                 logger.info(f"Indexing specific commit: {self.commit}")
                 self._index_all_files()
@@ -169,6 +164,8 @@ class GitDataSourceHandler(DataSourceHandler):
                 try:
                     self.repo.git.checkout(self.branch)
                     logger.info(f"Checked out branch: {self.branch}")
+                    self.repo.remotes.origin.fetch()
+                    self.repo.git.pull()
                 except git.exc.GitCommandError as e:
                     logger.warning(f"Failed to checkout branch {self.branch}: {e}")
                     # Continue with default branch
@@ -180,15 +177,7 @@ class GitDataSourceHandler(DataSourceHandler):
                     logger.info(f"Checked out commit: {self.commit}")
                 except git.exc.GitCommandError as e:
                     raise DataSourceError(f"Failed to checkout commit {self.commit}: {e}")
-            
-            if not self.commit and self.is_drift_remediation_run and self.last_indexed_commit:
-                # For drift remediation runs without specific commit, pull latest changes
-                self.repo.git.checkout(self.last_indexed_commit)
-                logger.info(f"Checked out commit: {self.last_indexed_commit}")
 
-            
-            self.repo.remotes.origin.fetch()
-            self.repo.git.pull()
             # Capture the current commit hash for later use
             self.current_commit_hash = self.repo.head.commit.hexsha
             logger.info(f"Current commit hash: {self.current_commit_hash}")
@@ -311,46 +300,6 @@ class GitDataSourceHandler(DataSourceHandler):
                 self._delete_documents_batch(delete_doc_ids)
                 
             logger.info(f"Processed diff: {len(create_docs)} created, {len(update_docs)} updated, {len(delete_doc_ids)} deleted")
-            
-        except Exception as e:
-            raise DataSourceError(f"Failed to index diff files: {e}")
-
-    def _drift_remediation(self):
-        """Index files against whats existing in the RAG from last known commit."""
-        try:
-            files = self._get_repository_files()
-            create_docs = []
-            update_docs = []
-            
-            for file_path in files:
-                try:
-                    content = self._read_file_content(file_path)
-                    resp = self.rag_client.list_documents(self.index_name, {"file_path": file_path}, limit=1)
-                    new_doc = self._create_document(file_path, content, "drift_remediation")
-                    if resp and resp.documents:
-                        resp_doc_id = resp.documents[0].doc_id
-                        new_doc.doc_id = resp_doc_id
-                        update_docs.append(new_doc)
-                    else:
-                        create_docs.append(new_doc)
-                except Exception as e:
-                    logger.warning(f"Failed to process file {file_path}: {e}")
-                    continue
-
-                if len(create_docs) >= 10:
-                    self._index_documents_batch(create_docs)
-                    create_docs = []
-                if len(update_docs) >= 10:
-                    self._update_documents_batch(update_docs)
-                    update_docs = []
-            
-            # Process all changes
-            if create_docs:
-                self._index_documents_batch(create_docs)
-            if update_docs:
-                self._update_documents_batch(update_docs)
-                
-            logger.info(f"Processed diff: {len(create_docs)} created, {len(update_docs)} updated")
             
         except Exception as e:
             raise DataSourceError(f"Failed to index diff files: {e}")

@@ -168,11 +168,6 @@ class AutoIndexerJob:
                 if not self.datasource_config:
                     self.datasource_config = {}
                 
-                annotations = crd_config.get("annotations", {})
-                if "autoindexer.kaito.sh/drift-remediation" in annotations:
-                    self.datasource_config["driftRemediationRun"] = annotations["autoindexer.kaito.sh/drift-remediation"].lower() == "true"
-                    logger.info(f"drift remediation annotations: {self.datasource_config['driftRemediationRun']}")
-                
                 # Make sure autoindexer_name includes namespace for uniqueness
                 autoindexer_full_name = f"{self.namespace}_{self.autoindexer_name}"
                 

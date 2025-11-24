@@ -14,52 +14,10 @@
 package controllers
 
 import (
-	"context"
-	"fmt"
-	"time"
-
-	batchv1 "k8s.io/api/batch/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/klog/v2"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	autoindexerv1alpha1 "github.com/kaito-project/autoindexer/api/v1alpha1"
 )
-
-// updateAutoIndexerStatus updates the AutoIndexer status based on job/cronjob states
-func (r *AutoIndexerReconciler) updateAutoIndexerStatus(ctx context.Context, autoIndexerObj *autoindexerv1alpha1.AutoIndexer) error {
-	// Update next scheduled run for CronJobs
-	if autoIndexerObj.Spec.Schedule != nil {
-		if err := r.updateNextScheduledRun(ctx, autoIndexerObj); err != nil {
-			klog.ErrorS(err, "failed to update next scheduled run", "autoindexer", klog.KObj(autoIndexerObj))
-		}
-	}
-
-	return nil
-}
-
-// updateNextScheduledRun calculates and updates the next scheduled run time
-func (r *AutoIndexerReconciler) updateNextScheduledRun(ctx context.Context, autoIndexerObj *autoindexerv1alpha1.AutoIndexer) error {
-	// Get CronJob
-	cronJobs := &batchv1.CronJobList{}
-	if err := r.Client.List(ctx, cronJobs, client.InNamespace(autoIndexerObj.Namespace), client.MatchingLabels{
-		AutoIndexerNameLabel: autoIndexerObj.Name,
-	}); err != nil {
-		return err
-	}
-
-	if len(cronJobs.Items) > 0 {
-		cronJob := cronJobs.Items[0]
-		if cronJob.Status.LastScheduleTime != nil {
-			// Calculate next run based on schedule
-			// This is a simplified calculation - in practice, you'd want to use a proper cron parser
-			nextRun := cronJob.Status.LastScheduleTime.Add(time.Hour) // Placeholder logic
-			autoIndexerObj.Status.NextScheduledIndexing = &metav1.Time{Time: nextRun}
-		}
-	}
-
-	return nil
-}
 
 // setAutoIndexerCondition sets a condition on the AutoIndexer status
 func (r *AutoIndexerReconciler) setAutoIndexerCondition(autoIndexerObj *autoindexerv1alpha1.AutoIndexer, conditionType autoindexerv1alpha1.ConditionType, status metav1.ConditionStatus, reason, message string) {
@@ -97,40 +55,9 @@ func (r *AutoIndexerReconciler) getAutoIndexerCondition(autoIndexerObj *autoinde
 	return nil
 }
 
-// isAutoIndexerReady checks if the AutoIndexer is in a ready state
-func (r *AutoIndexerReconciler) isAutoIndexerReady(autoIndexerObj *autoindexerv1alpha1.AutoIndexer) bool {
-	condition := r.getAutoIndexerCondition(autoIndexerObj, autoindexerv1alpha1.ConditionTypeResourceStatus)
-	return condition != nil && condition.Status == metav1.ConditionTrue
-}
-
 // recordAutoIndexerEvent records an event for the AutoIndexer
 func (r *AutoIndexerReconciler) recordAutoIndexerEvent(autoIndexerObj *autoindexerv1alpha1.AutoIndexer, eventType, reason, message string) {
 	if r.Recorder != nil {
 		r.Recorder.Event(autoIndexerObj, eventType, reason, message)
 	}
-}
-
-// handleJobFailure handles job failure scenarios
-func (r *AutoIndexerReconciler) handleJobFailure(ctx context.Context, autoIndexerObj *autoindexerv1alpha1.AutoIndexer, job *batchv1.Job, err error) error {
-	// Record failure
-	errorMessage := fmt.Sprintf("Indexing job %s failed: %v", job.Name, err)
-	r.recordAutoIndexerEvent(autoIndexerObj, "Warning", "JobFailed", errorMessage)
-
-	// Update condition
-	r.setAutoIndexerCondition(autoIndexerObj, autoindexerv1alpha1.AutoIndexerConditionTypeError, metav1.ConditionTrue, "JobFailed", errorMessage)
-
-	return nil
-}
-
-// handleJobSuccess handles successful job completion
-func (r *AutoIndexerReconciler) handleJobSuccess(ctx context.Context, autoIndexerObj *autoindexerv1alpha1.AutoIndexer, job *batchv1.Job) error {
-	// Record success
-	successMessage := fmt.Sprintf("Indexing job %s completed successfully", job.Name)
-	r.recordAutoIndexerEvent(autoIndexerObj, "Normal", "JobSucceeded", successMessage)
-
-	// Update condition
-	r.setAutoIndexerCondition(autoIndexerObj, autoindexerv1alpha1.AutoIndexerConditionTypeSucceeded, metav1.ConditionTrue, "JobSucceeded", successMessage)
-	r.setAutoIndexerCondition(autoIndexerObj, autoindexerv1alpha1.AutoIndexerConditionTypeError, metav1.ConditionFalse, "JobSucceeded", "")
-
-	return nil
 }

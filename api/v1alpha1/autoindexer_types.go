@@ -91,11 +91,11 @@ type DataSourceSpec struct {
 type DataSourceType string
 
 const (
-	DataSourceTypeGitHub DataSourceType = "Git"
+	DataSourceTypeGit    DataSourceType = "Git"
 	DataSourceTypeStatic DataSourceType = "Static"
 )
 
-// GitHubDataSourceSpec defines GitHub repository configuration
+// GitDataSourceSpec defines Git repository configuration
 type GitDataSourceSpec struct {
 	// Repository to index. If the repository is not public and a token is needed for access,
 	// the access token can be stored in a secret and loaded with the SecretRef in the credential spec
@@ -177,7 +177,8 @@ type AutoIndexerStatus struct {
 
 	// IndexingPhase represents the current phase of the AutoIndexer
 	// +optional
-	// +kubebuilder:validation:Enum=Pending;Running;Completed;Failed;Retrying;Unknown
+	// +kubebuilder:validation:Enum=Pending;Running;Suspended;Scheduled;Completed;Failed;DriftRemediation
+	// +kubebuilder:default=Pending
 	IndexingPhase AutoIndexerPhase `json:"indexingPhase,omitempty"`
 
 	// SuccessfulIndexingCount tracks successful indexing runs
@@ -204,16 +205,17 @@ type AutoIndexerStatus struct {
 }
 
 // AutoIndexerPhase defines the current phase of the AutoIndexer
-// +kubebuilder:validation:Enum=Pending;Running;Completed;Failed;Retrying;Unknown
+// +kubebuilder:validation:Enum=Pending;Running;Suspended;Scheduled;Completed;Failed;DriftRemediation
 type AutoIndexerPhase string
 
 const (
-	AutoIndexerPhasePending   AutoIndexerPhase = "Pending"
-	AutoIndexerPhaseRunning   AutoIndexerPhase = "Running"
-	AutoIndexerPhaseCompleted AutoIndexerPhase = "Completed"
-	AutoIndexerPhaseFailed    AutoIndexerPhase = "Failed"
-	AutoIndexerPhaseRetrying  AutoIndexerPhase = "Retrying"
-	AutoIndexerPhaseUnknown   AutoIndexerPhase = "Unknown"
+	AutoIndexerPhasePending          AutoIndexerPhase = "Pending"
+	AutoIndexerPhaseRunning          AutoIndexerPhase = "Running"
+	AutoIndexerPhaseSuspended        AutoIndexerPhase = "Suspended"
+	AutoIndexerPhaseScheduled        AutoIndexerPhase = "Scheduled"
+	AutoIndexerPhaseCompleted        AutoIndexerPhase = "Completed"
+	AutoIndexerPhaseFailed           AutoIndexerPhase = "Failed"
+	AutoIndexerPhaseDriftRemediation AutoIndexerPhase = "DriftRemediation"
 )
 
 //+kubebuilder:object:root=true

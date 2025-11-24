@@ -132,8 +132,8 @@ func (d *DriftDetectorImpl) performDriftCheck() {
 
 		// Call the reconciler function if drift is detected
 		if result.DriftDetected {
-			if err := d.addDriftRemediationAnnotationToAutoIndexer(ctx, &autoIndexer); err != nil {
-				d.logger.Error(err, "Failed to add drift remediation annotation to AutoIndexer",
+			if err := d.setStatusToDriftRemediation(ctx, &autoIndexer); err != nil {
+				d.logger.Error(err, "Failed to set status to drift remediation for AutoIndexer",
 					"autoindexer", result.AutoIndexerName,
 					"namespace", result.AutoIndexerNamespace)
 			}
@@ -168,11 +168,8 @@ func (d *DriftDetectorImpl) checkAutoIndexerDrift(ctx context.Context, autoIndex
 		return result
 	}
 
-	// Get the RAG engine endpoint
-	ragEngineEndpoint := generateRAGEngineEndpoint(autoIndexer.Spec.RAGEngine, autoIndexer.Namespace)
-
 	// Get actual document count from RAG engine
-	actualCount, err := d.ragClient.GetDocumentCount(ragEngineEndpoint, autoIndexer.Spec.IndexName, autoIndexer.Name, autoIndexer.Namespace)
+	actualCount, err := d.ragClient.GetDocumentCount(autoIndexer.Spec.RAGEngine, autoIndexer.Spec.IndexName, autoIndexer.Name, autoIndexer.Namespace)
 	if err != nil {
 		result.Error = fmt.Errorf("failed to get document count from RAG engine: %w", err)
 		return result
@@ -198,14 +195,14 @@ func (d *DriftDetectorImpl) checkAutoIndexerDrift(ctx context.Context, autoIndex
 // isAutoIndexerInStableState checks if the AutoIndexer is in a stable state for drift checking
 func (d *DriftDetectorImpl) isAutoIndexerInStableState(autoIndexer *autoindexerv1alpha1.AutoIndexer) bool {
 	switch autoIndexer.Status.IndexingPhase {
-	case autoindexerv1alpha1.AutoIndexerPhaseCompleted:
-		return true
-	case autoindexerv1alpha1.AutoIndexerPhaseFailed:
-		// Allow checking failed indexers in case the failure was temporary
+	case autoindexerv1alpha1.AutoIndexerPhaseCompleted,
+		autoindexerv1alpha1.AutoIndexerPhaseScheduled:
 		return true
 	case autoindexerv1alpha1.AutoIndexerPhasePending,
 		autoindexerv1alpha1.AutoIndexerPhaseRunning,
-		autoindexerv1alpha1.AutoIndexerPhaseRetrying:
+		autoindexerv1alpha1.AutoIndexerPhaseSuspended,
+		autoindexerv1alpha1.AutoIndexerPhaseDriftRemediation,
+		autoindexerv1alpha1.AutoIndexerPhaseFailed:
 		// Skip actively running or pending indexers
 		return false
 	default:
@@ -220,15 +217,15 @@ func (d *DriftDetectorImpl) determineDriftAction(autoIndexer *autoindexerv1alpha
 	return DriftActionTriggerJob
 }
 
-func (d *DriftDetectorImpl) addDriftRemediationAnnotationToAutoIndexer(ctx context.Context, autoIndexer *autoindexerv1alpha1.AutoIndexer) error {
+func (d *DriftDetectorImpl) setStatusToDriftRemediation(ctx context.Context, autoIndexer *autoindexerv1alpha1.AutoIndexer) error {
 	// Add annotation to indicate drift remediation is in progress
 	if autoIndexer.Annotations == nil {
 		autoIndexer.Annotations = make(map[string]string)
 	}
-	autoIndexer.Annotations["autoindexer.kaito.sh/drift-remediation"] = "true"
+	autoIndexer.Status.IndexingPhase = autoindexerv1alpha1.AutoIndexerPhaseDriftRemediation
 	err := d.client.Update(ctx, autoIndexer)
 	if err != nil {
-		return fmt.Errorf("failed to add drift remediation annotation to AutoIndexer: %w", err)
+		return fmt.Errorf("failed to set status to drift remediation for AutoIndexer: %w", err)
 	}
 	return nil
 }
