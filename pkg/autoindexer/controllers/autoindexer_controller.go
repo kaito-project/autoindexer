@@ -90,6 +90,7 @@ func NewAutoIndexerReconciler(client client.Client, scheme *runtime.Scheme, log 
 		Log:           log,
 		Recorder:      recorder,
 		DriftDetector: driftDetector,
+		RAGClient:     ragClient,
 	}
 }
 
