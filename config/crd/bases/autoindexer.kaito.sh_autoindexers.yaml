@@ -262,17 +262,20 @@ spec:
                 - enum:
                   - Pending
                   - Running
+                  - Suspended
+                  - Scheduled
                   - Completed
                   - Failed
-                  - Retrying
-                  - Unknown
+                  - DriftRemediation
                 - enum:
                   - Pending
                   - Running
+                  - Suspended
+                  - Scheduled
                   - Completed
                   - Failed
-                  - Retrying
-                  - Unknown
+                  - DriftRemediation
+                default: Pending
                 description: IndexingPhase represents the current phase of the AutoIndexer
                 type: string
               lastIndexedCommit:
