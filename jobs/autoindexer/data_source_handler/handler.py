@@ -67,8 +67,6 @@ class DataSourceHandler(ABC):
         status_update = {
             "lastIndexingTimestamp": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
             "lastIndexingDurationSeconds": indexing_duration_seconds,
-            "indexingPhase": "Completed",
-            "successfulIndexingCount": current_status.get("successfulIndexingCount", 0) + 1,
             "numOfDocumentInIndex": 0,
             "conditions": current_status.get("conditions", [])
         }
@@ -91,10 +89,12 @@ class DataSourceHandler(ABC):
         )
         
         if errors:
+            status_update["errorIndexingCount"] = current_status.get("errorIndexingCount", 0) + 1
             conditions["AutoIndexerError"] = autoindexer_client._create_condition(
                 "AutoIndexerError", "True", "IndexingErrors", f"Indexing completed with errors: {errors}", observed_generation=current_generation
             )
         else:
+            status_update["successfulIndexingCount"] = current_status.get("successfulIndexingCount", 0) + 1
             conditions["AutoIndexerError"] = autoindexer_client._create_condition(
                 "AutoIndexerError", "False", "IndexingCompleted", "No errors during indexing", observed_generation=current_generation
             )

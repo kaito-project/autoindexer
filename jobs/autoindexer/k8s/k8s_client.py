@@ -126,12 +126,6 @@ class AutoIndexerK8sClient:
                 current["status"] = {}
             
             current["status"].update(status_update)
-
-            if update_success_or_failure:
-                if status_update.get("indexingPhase") == "Completed":
-                    current["status"]["successfulIndexingCount"] = current["status"].get("successfulIndexingCount", 0) + 1
-                elif status_update.get("indexingPhase") == "Failed":
-                    current["status"]["errorIndexingCount"] = current["status"].get("errorIndexingCount", 0) + 1
             
             # Patch the status subresource
             self.custom_api.patch_namespaced_custom_object_status(
@@ -267,28 +261,6 @@ class AutoIndexerK8sClient:
 
         return self.update_autoindexer_status(progress_update)
 
-    def update_indexing_phase(self, phase: str) -> bool:
-        """
-        Update the indexing phase in the AutoIndexer status.
-        
-        Args:
-            phase: Indexing phase - should be one of:
-                - "Pending"
-                - "Running" 
-                - "Completed"
-                - "Failed"
-                - "Retrying"
-                - "Unknown"
-            
-        Returns:
-            bool: True if successful, False otherwise
-        """
-        phase_update = {
-            "indexingPhase": phase
-        }
-
-        return self.update_autoindexer_status(phase_update)
-
     def update_indexing_completion(self, success: bool, duration_seconds: int, document_count: int, commit_hash: str | None = None) -> bool:
         """
         Update status when indexing completes.
@@ -308,7 +280,6 @@ class AutoIndexerK8sClient:
             "lastIndexingTimestamp": now,
             "lastIndexingDurationSeconds": duration_seconds,
             "numOfDocumentInIndex": document_count,
-            "indexingPhase": "Completed" if success else "Failed"
         }
         
         if success:

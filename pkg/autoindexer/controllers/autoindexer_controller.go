@@ -130,23 +130,13 @@ func (r *AutoIndexerReconciler) addAutoIndexer(ctx context.Context, autoIndexerO
 	existingAutoIndexerObj := autoIndexerObj.DeepCopy()
 
 	// Always ensure required resources exist and are up to date
-	// This handles user modifications and deleted resources
+	// This handles user modifications and deleted resources(rbac, service account, etc)
 	if err := r.ensureRequiredResources(ctx, autoIndexerObj); err != nil {
 		r.Log.Error(err, "failed to ensure required resources", "autoindexer", autoIndexerObj.Name)
 		return r.patchAndReturn(ctx, autoIndexerObj, existingAutoIndexerObj, ctrl.Result{}, err)
 	}
 
-	// Validate and potentially correct the current phase after ensuring resources
-	phaseChanged, err := r.validateAndCorrectPhase(ctx, autoIndexerObj)
-	if err != nil {
-		r.Log.Error(err, "failed to validate phase", "autoindexer", autoIndexerObj.Name)
-		return r.patchAndReturn(ctx, autoIndexerObj, existingAutoIndexerObj, ctrl.Result{}, err)
-	}
-	if phaseChanged {
-		r.Log.Info("Phase was corrected, requeuing", "AutoIndexer", autoIndexerObj.Name)
-		return r.patchAndReturn(ctx, autoIndexerObj, existingAutoIndexerObj, ctrl.Result{}, nil)
-	}
-
+	var err error
 	// Handle reconciliation based on current phase
 	switch autoIndexerObj.Status.IndexingPhase {
 	case autoindexerv1alpha1.AutoIndexerPhasePending:
@@ -182,84 +172,6 @@ func (r *AutoIndexerReconciler) addAutoIndexer(ctx context.Context, autoIndexerO
 	return r.patchAndReturn(ctx, autoIndexerObj, existingAutoIndexerObj, ctrl.Result{}, nil)
 }
 
-// validateAndCorrectPhase ensures the current phase is valid based on actual state
-func (r *AutoIndexerReconciler) validateAndCorrectPhase(ctx context.Context, autoIndexerObj *autoindexerv1alpha1.AutoIndexer) (bool, error) {
-	currentPhase := autoIndexerObj.Status.IndexingPhase
-	r.Log.Info("Validating current phase", "AutoIndexer", autoIndexerObj.Name, "currentPhase", currentPhase)
-
-	if currentPhase == "" {
-		r.Log.Info("No current phase set, defaulting to Pending", "AutoIndexer", autoIndexerObj.Name)
-		r.updateStatus(ctx, autoIndexerObj, autoindexerv1alpha1.AutoIndexerPhasePending, "PhaseDefaulted", "No phase was set, defaulting to Pending", nil)
-		return true, nil
-	}
-
-	// If we're in drift remediation or pending, no need to validate further
-	if currentPhase == autoindexerv1alpha1.AutoIndexerPhaseDriftRemediation || currentPhase == autoindexerv1alpha1.AutoIndexerPhasePending {
-		return false, nil
-	}
-
-	// Get current job status
-	runningJobs, failedJobs, completedJobs, latestJobFailed, err := r.getJobStatus(ctx, autoIndexerObj)
-	if err != nil {
-		return false, fmt.Errorf("failed to get job status: %w", err)
-	}
-
-	// If there are running jobs, we should be in Running phase
-	if runningJobs > 0 {
-		if currentPhase != autoindexerv1alpha1.AutoIndexerPhaseRunning {
-			r.Log.Info("Running jobs found, correcting phase to Running", "AutoIndexer", autoIndexerObj.Name, "runningJobs", runningJobs)
-			r.updateStatus(ctx, autoIndexerObj, autoindexerv1alpha1.AutoIndexerPhaseRunning, "JobsRunning", fmt.Sprintf("%d jobs are currently running", runningJobs), nil)
-			return true, nil
-		}
-		return false, nil
-	}
-
-	if autoIndexerObj.Annotations["autoindexer.kaito.dev/drift-detected"] == "true" {
-		if currentPhase != autoindexerv1alpha1.AutoIndexerPhaseDriftRemediation {
-			r.Log.Info("Drift detected annotation found, correcting phase to DriftRemediation", "AutoIndexer", autoIndexerObj.Name)
-			delete(autoIndexerObj.Annotations, "autoindexer.kaito.dev/drift-detected")
-			r.updateStatus(ctx, autoIndexerObj, autoindexerv1alpha1.AutoIndexerPhaseDriftRemediation, "DriftDetected", "Drift detected, entering remediation phase", nil)
-			return true, nil
-		}
-	}
-
-	// If we have a schedule
-	if autoIndexerObj.Spec.Schedule != nil {
-		if autoIndexerObj.Spec.Suspend != nil && *autoIndexerObj.Spec.Suspend {
-			// Should be suspended
-			if currentPhase != autoindexerv1alpha1.AutoIndexerPhaseSuspended {
-				r.Log.Info("Schedule is suspended, correcting phase", "AutoIndexer", autoIndexerObj.Name)
-				r.updateStatus(ctx, autoIndexerObj, autoindexerv1alpha1.AutoIndexerPhaseSuspended, "Suspended", "AutoIndexer is suspended", nil)
-				return true, nil
-			}
-		} else {
-			// Should be scheduled (if no running jobs)
-			if currentPhase != autoindexerv1alpha1.AutoIndexerPhaseScheduled && currentPhase != autoindexerv1alpha1.AutoIndexerPhasePending {
-				r.Log.Info("Schedule is active and no running jobs, correcting phase", "AutoIndexer", autoIndexerObj.Name)
-				r.updateStatus(ctx, autoIndexerObj, autoindexerv1alpha1.AutoIndexerPhaseScheduled, "Scheduled", "AutoIndexer is scheduled and waiting", nil)
-				return true, nil
-			}
-		}
-	} else {
-		// Non-scheduled AutoIndexer
-		if failedJobs > 0 && latestJobFailed {
-			if currentPhase != autoindexerv1alpha1.AutoIndexerPhaseFailed {
-				r.Log.Info("Failed jobs found, correcting phase", "AutoIndexer", autoIndexerObj.Name, "failedJobs", failedJobs)
-				r.updateStatus(ctx, autoIndexerObj, autoindexerv1alpha1.AutoIndexerPhaseFailed, "JobsFailed", fmt.Sprintf("%d jobs have failed", failedJobs), nil)
-				return true, nil
-			}
-		} else if completedJobs > 0 && runningJobs == 0 {
-			if currentPhase != autoindexerv1alpha1.AutoIndexerPhaseCompleted && currentPhase != autoindexerv1alpha1.AutoIndexerPhasePending {
-				r.Log.Info("Completed jobs found and no running jobs, correcting phase", "AutoIndexer", autoIndexerObj.Name, "completedJobs", completedJobs)
-				r.updateStatus(ctx, autoIndexerObj, autoindexerv1alpha1.AutoIndexerPhaseCompleted, "JobsCompleted", fmt.Sprintf("%d jobs have completed successfully", completedJobs), nil)
-				return true, nil
-			}
-		}
-	}
-
-	return false, nil
-}
-
 // getJobStatus returns counts of running, failed, and completed jobs for the AutoIndexer
 func (r *AutoIndexerReconciler) getJobStatus(ctx context.Context, autoIndexerObj *autoindexerv1alpha1.AutoIndexer) (running, failed, completed int, latestJobFailed bool, err error) {
 	jobs := &batchv1.JobList{}
@@ -277,7 +189,7 @@ func (r *AutoIndexerReconciler) getJobStatus(ctx context.Context, autoIndexerObj
 	latestJobFailed = false
 	lastJobTimestamp := time.Time{}
 	for _, job := range jobs.Items {
-		if lastJobTimestamp.IsZero() {
+		if lastJobTimestamp.IsZero() && !job.Status.StartTime.IsZero() {
 			lastJobTimestamp = job.Status.StartTime.Time
 		}
 		if job.Status.Active > 0 {
@@ -386,6 +298,12 @@ func (r *AutoIndexerReconciler) handleScheduledPhase(ctx context.Context, autoIn
 
 	if runningJobs > 0 {
 		r.updateStatus(ctx, autoIndexerObj, autoindexerv1alpha1.AutoIndexerPhaseRunning, "JobsRunning", fmt.Sprintf("%d jobs are now running", runningJobs), nil)
+		return nil
+	}
+
+	if autoIndexerObj.Annotations["autoindexer.kaito.dev/drift-detected"] == "true" {
+		delete(autoIndexerObj.Annotations, "autoindexer.kaito.dev/drift-detected")
+		r.updateStatus(ctx, autoIndexerObj, autoindexerv1alpha1.AutoIndexerPhaseDriftRemediation, "DriftDetected", "Drift detected, entering remediation phase", nil)
 	}
 
 	return nil
@@ -444,25 +362,6 @@ func (r *AutoIndexerReconciler) handleCompletedPhase(ctx context.Context, autoIn
 func (r *AutoIndexerReconciler) handleFailedPhase(ctx context.Context, autoIndexerObj *autoindexerv1alpha1.AutoIndexer) error {
 	r.Log.Info("Handling Failed phase", "AutoIndexer", autoIndexerObj.Name)
 
-	// Check if we should retry by looking at job status
-	runningJobs, failedJobs, _, _, err := r.getJobStatus(ctx, autoIndexerObj)
-	if err != nil {
-		r.Log.Error(err, "failed to get job status", "AutoIndexer", autoIndexerObj.Name)
-		return nil
-	}
-
-	// If there are running jobs, move to Running phase
-	if runningJobs > 0 {
-		r.updateStatus(ctx, autoIndexerObj, autoindexerv1alpha1.AutoIndexerPhaseRunning, "JobsRetrying", "Jobs are now running again", nil)
-		return nil
-	}
-
-	// If no failed jobs, we can reset
-	if failedJobs == 0 {
-		r.updateStatus(ctx, autoIndexerObj, autoindexerv1alpha1.AutoIndexerPhasePending, "Reset", "No failed jobs found, resetting to Pending", nil)
-		return nil
-	}
-
 	return nil
 }
 
@@ -506,6 +405,7 @@ func (r *AutoIndexerReconciler) handleDriftRemediationPhase(ctx context.Context,
 	if autoIndexerObj.Spec.DataSource.Type == autoindexerv1alpha1.DataSourceTypeGit {
 		emptyCommit := ""
 		autoIndexerObj.Status.LastIndexedCommit = &emptyCommit
+		autoIndexerObj.Status.NumOfDocumentInIndex = 0
 		r.Log.Info("Reset LastIndexedCommit due to drift remediation", "AutoIndexer", autoIndexerObj.Name)
 	}
 

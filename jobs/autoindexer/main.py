@@ -212,9 +212,7 @@ class AutoIndexerJob:
         
         try:
             logger.info("Starting document indexing process")
-            
-            # Update phase and status to indicate we're starting
-            self._update_indexing_phase("Running")
+
             self._update_status_condition("AutoIndexerIndexing", "True", "IndexingStarted", "Document indexing process has started")
 
             # Update the index and check for errors
@@ -324,16 +322,6 @@ class AutoIndexerJob:
                 logger.warning(f"Failed to update indexing progress: {e}")
         else:
             logger.debug(f"Progress update (no K8s client): {processed_documents}/{total_documents} documents processed")
-
-    def _update_indexing_phase(self, phase: str):
-        """Update indexing phase in the AutoIndexer CRD if Kubernetes client is available."""
-        if self.k8s_client:
-            try:
-                self.k8s_client.update_indexing_phase(phase)
-            except Exception as e:
-                logger.warning(f"Failed to update indexing phase: {e}")
-        else:
-            logger.debug(f"Phase update (no K8s client): {phase}")
 
     def _update_indexing_completion(self, success: bool, duration_seconds: int, document_count: int, commit_hash: str | None = None):
         """Update status when indexing completes."""

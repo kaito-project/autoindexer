@@ -160,6 +160,13 @@ func (d *DriftDetectorImpl) checkAutoIndexerDrift(ctx context.Context, autoIndex
 		return result
 	}
 
+	if autoIndexer.Status.NumOfDocumentInIndex == 0 {
+		d.logger.V(1).Info("Skipping drift check for AutoIndexer with no indexed documents",
+			"autoindexer", autoIndexer.Name,
+			"namespace", autoIndexer.Namespace)
+		return result
+	}
+
 	// Skip if AutoIndexer is suspended
 	if autoIndexer.Spec.Suspend != nil && *autoIndexer.Spec.Suspend {
 		d.logger.V(1).Info("Skipping drift check for suspended AutoIndexer",
@@ -195,14 +202,14 @@ func (d *DriftDetectorImpl) checkAutoIndexerDrift(ctx context.Context, autoIndex
 // isAutoIndexerInStableState checks if the AutoIndexer is in a stable state for drift checking
 func (d *DriftDetectorImpl) isAutoIndexerInStableState(autoIndexer *autoindexerv1alpha1.AutoIndexer) bool {
 	switch autoIndexer.Status.IndexingPhase {
-	case autoindexerv1alpha1.AutoIndexerPhaseCompleted,
-		autoindexerv1alpha1.AutoIndexerPhaseScheduled:
+	case autoindexerv1alpha1.AutoIndexerPhaseScheduled:
 		return true
 	case autoindexerv1alpha1.AutoIndexerPhasePending,
 		autoindexerv1alpha1.AutoIndexerPhaseRunning,
 		autoindexerv1alpha1.AutoIndexerPhaseSuspended,
 		autoindexerv1alpha1.AutoIndexerPhaseDriftRemediation,
-		autoindexerv1alpha1.AutoIndexerPhaseFailed:
+		autoindexerv1alpha1.AutoIndexerPhaseFailed,
+		autoindexerv1alpha1.AutoIndexerPhaseCompleted:
 		// Skip actively running or pending indexers
 		return false
 	default:
