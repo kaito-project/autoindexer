@@ -326,7 +326,7 @@ func TestAutoIndexerReconciler_GetJobStatus(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	running, failed, completed, err := reconciler.getJobStatus(ctx, autoIndexer)
+	running, failed, completed, latestJobFailed, err := reconciler.getJobStatus(ctx, autoIndexer)
 
 	if err != nil {
 		t.Fatalf("getJobStatus failed: %v", err)
@@ -340,6 +340,9 @@ func TestAutoIndexerReconciler_GetJobStatus(t *testing.T) {
 	}
 	if completed != 1 {
 		t.Errorf("Expected 1 completed job, got %d", completed)
+	}
+	if latestJobFailed {
+		t.Errorf("Expected latest job to not have failed")
 	}
 }
 

@@ -14,7 +14,12 @@
 package controllers
 
 import (
+	"context"
+
+	"k8s.io/apimachinery/pkg/api/equality"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	autoindexerv1alpha1 "github.com/kaito-project/autoindexer/api/v1alpha1"
 )
@@ -43,6 +48,15 @@ func (r *AutoIndexerReconciler) setAutoIndexerCondition(autoIndexerObj *autoinde
 
 	// Add new condition
 	autoIndexerObj.Status.Conditions = append(autoIndexerObj.Status.Conditions, condition)
+}
+
+func (r *AutoIndexerReconciler) patchAndReturn(ctx context.Context, obj, original *autoindexerv1alpha1.AutoIndexer, result ctrl.Result, err error) (ctrl.Result, error) {
+	if !equality.Semantic.DeepEqual(original.Status, obj.Status) {
+		if patchErr := r.Status().Patch(ctx, obj, client.MergeFrom(original)); patchErr != nil {
+			return ctrl.Result{}, patchErr
+		}
+	}
+	return result, err
 }
 
 // getAutoIndexerCondition gets a condition by type from the AutoIndexer status

@@ -132,8 +132,8 @@ func (d *DriftDetectorImpl) performDriftCheck() {
 
 		// Call the reconciler function if drift is detected
 		if result.DriftDetected {
-			if err := d.setStatusToDriftRemediation(ctx, &autoIndexer); err != nil {
-				d.logger.Error(err, "Failed to set status to drift remediation for AutoIndexer",
+			if err := d.setDriftDetected(ctx, &autoIndexer); err != nil {
+				d.logger.Error(err, "Failed to set drift detected annotation for AutoIndexer",
 					"autoindexer", result.AutoIndexerName,
 					"namespace", result.AutoIndexerNamespace)
 			}
@@ -217,15 +217,15 @@ func (d *DriftDetectorImpl) determineDriftAction(autoIndexer *autoindexerv1alpha
 	return DriftActionTriggerJob
 }
 
-func (d *DriftDetectorImpl) setStatusToDriftRemediation(ctx context.Context, autoIndexer *autoindexerv1alpha1.AutoIndexer) error {
+func (d *DriftDetectorImpl) setDriftDetected(ctx context.Context, autoIndexer *autoindexerv1alpha1.AutoIndexer) error {
 	// Add annotation to indicate drift remediation is in progress
 	if autoIndexer.Annotations == nil {
 		autoIndexer.Annotations = make(map[string]string)
 	}
-	autoIndexer.Status.IndexingPhase = autoindexerv1alpha1.AutoIndexerPhaseDriftRemediation
+	autoIndexer.Annotations["autoindexer.kaito.dev/drift-detected"] = "true"
 	err := d.client.Update(ctx, autoIndexer)
 	if err != nil {
-		return fmt.Errorf("failed to set status to drift remediation for AutoIndexer: %w", err)
+		return fmt.Errorf("failed to set annotation for AutoIndexer: %w", err)
 	}
 	return nil
 }
