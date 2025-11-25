@@ -196,17 +196,6 @@ func (r *RAGEngineClientImpl) deleteIndexAttempt(ragEngineEndpoint, indexName st
 		return fmt.Errorf("RAG engine returned non-200 status: %d, body: %s", resp.StatusCode, string(body))
 	}
 
-	// Read and parse the response
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return fmt.Errorf("failed to read response body: %w", err)
-	}
-
-	var response []string
-	if err := json.Unmarshal(body, &response); err != nil {
-		return fmt.Errorf("failed to parse response JSON: %w", err)
-	}
-
 	return nil
 }
 

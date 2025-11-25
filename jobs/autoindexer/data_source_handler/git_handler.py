@@ -250,7 +250,7 @@ class GitDataSourceHandler(DataSourceHandler):
                     content = self._read_file_content(file_path)
                     if not content:
                         continue
-                    list_resp = self.rag_client.list_documents(self.index_name, {"file_path": file_path}, limit=1)
+                    list_resp = self.rag_client.list_documents(index_name=self.index_name, metadata_filter={"file_path": file_path}, limit=1)
                     if list_resp and list_resp.documents:
                         doc = self._create_document(file_path, content, "modified")
                         doc.doc_id = list_resp.documents[0].doc_id
@@ -261,7 +261,7 @@ class GitDataSourceHandler(DataSourceHandler):
                         create_docs.append(doc)
                         
                 elif diff_item.change_type == 'D':  # Deleted
-                    list_resp = self.rag_client.list_documents(self.index_name, {"file_path": file_path}, limit=1)
+                    list_resp = self.rag_client.list_documents(index_name=self.index_name, metadata_filter={"file_path": file_path}, limit=1)
                     if not list_resp or not list_resp.documents:
                         logger.warning(f"Failed to fetch file from rag {file_path} for deletion")
                         continue
@@ -273,7 +273,7 @@ class GitDataSourceHandler(DataSourceHandler):
                     if not content:
                         continue
                     if diff_item.a_path:
-                        list_resp = self.rag_client.list_documents(self.index_name, {"file_path": diff_item.a_path}, limit=1)
+                        list_resp = self.rag_client.list_documents(index_name=self.index_name, metadata_filter={"file_path": diff_item.a_path}, limit=1)
                         if list_resp and list_resp.documents:
                             doc = self._create_document(file_path, content, "renamed")
                             doc.doc_id = list_resp.documents[0].doc_id
@@ -476,5 +476,5 @@ class GitDataSourceHandler(DataSourceHandler):
         if self.current_commit_hash:
             status_update["lastIndexedCommit"] = self.current_commit_hash
 
-        if not self.autoindexer_client.update_autoindexer_status(status_update, update_success_or_failure=True):
+        if not self.autoindexer_client.update_autoindexer_status(status_update):
             logger.error("Failed to update AutoIndexer status")

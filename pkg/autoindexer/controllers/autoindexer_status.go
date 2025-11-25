@@ -50,13 +50,21 @@ func (r *AutoIndexerReconciler) setAutoIndexerCondition(autoIndexerObj *autoinde
 	autoIndexerObj.Status.Conditions = append(autoIndexerObj.Status.Conditions, condition)
 }
 
-func (r *AutoIndexerReconciler) patchAndReturn(ctx context.Context, obj, original *autoindexerv1alpha1.AutoIndexer, result ctrl.Result, err error) (ctrl.Result, error) {
-	if !equality.Semantic.DeepEqual(original.Spec, obj.Spec) || !equality.Semantic.DeepEqual(original.Annotations, obj.Annotations) {
+func (r *AutoIndexerReconciler) clearDriftAnnotations(ctx context.Context, autoIndexerObj *autoindexerv1alpha1.AutoIndexer) error {
+	existingAutoIndexer := autoIndexerObj.DeepCopy()
+	delete(autoIndexerObj.Annotations, "autoindexer.kaito.sh/drift-detected")
+
+	if !equality.Semantic.DeepEqual(existingAutoIndexer.Spec, autoIndexerObj.Spec) || !equality.Semantic.DeepEqual(existingAutoIndexer.Annotations, autoIndexerObj.Annotations) {
 		// Spec changed, patch the whole object
-		if patchErr := r.Patch(ctx, obj, client.MergeFrom(original)); patchErr != nil {
-			return ctrl.Result{}, patchErr
+		if patchErr := r.Patch(ctx, autoIndexerObj, client.MergeFrom(existingAutoIndexer)); patchErr != nil {
+			return patchErr
 		}
-	} else if !equality.Semantic.DeepEqual(original.Status, obj.Status) {
+	}
+	return nil
+}
+
+func (r *AutoIndexerReconciler) patchAndReturn(ctx context.Context, obj, original *autoindexerv1alpha1.AutoIndexer, result ctrl.Result, err error) (ctrl.Result, error) {
+	if !equality.Semantic.DeepEqual(original.Status, obj.Status) {
 		// Only status changed, patch the status subresource
 		if patchErr := r.Status().Patch(ctx, obj, client.MergeFrom(original)); patchErr != nil {
 			return ctrl.Result{}, patchErr

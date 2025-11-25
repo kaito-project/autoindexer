@@ -97,13 +97,12 @@ class AutoIndexerK8sClient:
                 logger.error(f"Failed to get AutoIndexer {self.namespace}/{self.autoindexer_name}: {e}")
                 raise
 
-    def update_autoindexer_status(self, status_update: dict[str, Any], update_success_or_failure: bool = False) -> bool:
+    def update_autoindexer_status(self, status_update: dict[str, Any]) -> bool:
         """
         Update the status of an AutoIndexer CRD.
         
         Args:
             status_update: Dictionary containing status updates
-            update_success_or_failure: Whether to update success/failure counters
             
         Returns:
             bool: True if successful, False otherwise

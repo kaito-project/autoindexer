@@ -225,9 +225,10 @@ class AutoIndexerJob:
             
             # Get document count
             try:
-                documents_response = self.rag_client.list_documents(self.index_name, metadata_filter={"autoindexer": self.autoindexer_name}, limit=1)
+                documents_response = self.rag_client.list_documents(index_name=self.index_name, metadata_filter={"autoindexer": f"{self.namespace}_{self.autoindexer_name}"}, limit=1)
                 document_count = documents_response.total_items
-            except Exception:
+            except Exception as e:
+                logger.error(f"Failed to get document count: {e}")
                 document_count = 0
             
             # Check if there were any errors during indexing
@@ -252,9 +253,10 @@ class AutoIndexerJob:
 
             # Try to get document count even in failure case
             try:
-                documents_response = self.rag_client.list_documents(self.index_name, metadata_filter={"autoindexer": self.autoindexer_name}, limit=1)
-                document_count = documents_response.get("total", 0)
-            except Exception:
+                documents_response = self.rag_client.list_documents(index_name=self.index_name, metadata_filter={"autoindexer": f"{self.namespace}_{self.autoindexer_name}"}, limit=1)
+                document_count = documents_response.total_items
+            except Exception as e:
+                logger.error(f"Failed to get document count: {e}")
                 document_count = 0
                 
             self._update_indexing_completion(False, duration_seconds, document_count, None)

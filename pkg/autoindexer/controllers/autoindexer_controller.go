@@ -194,19 +194,19 @@ func (r *AutoIndexerReconciler) getJobStatus(ctx context.Context, autoIndexerObj
 		}
 		if job.Status.Active > 0 {
 			running++
-			if job.Status.StartTime.Time.After(lastJobTimestamp) {
+			if job.Status.StartTime != nil && job.Status.StartTime.Time.After(lastJobTimestamp) {
 				latestJobFailed = false
 				lastJobTimestamp = job.Status.StartTime.Time
 			}
 		} else if job.Status.Failed > 0 {
 			failed++
-			if job.Status.StartTime.Time.After(lastJobTimestamp) {
+			if job.Status.StartTime != nil && job.Status.StartTime.Time.After(lastJobTimestamp) {
 				latestJobFailed = true
 				lastJobTimestamp = job.Status.StartTime.Time
 			}
 		} else if job.Status.Succeeded > 0 {
 			completed++
-			if job.Status.StartTime.Time.After(lastJobTimestamp) {
+			if job.Status.StartTime != nil && job.Status.StartTime.Time.After(lastJobTimestamp) {
 				latestJobFailed = false
 				lastJobTimestamp = job.Status.StartTime.Time
 			}
@@ -301,8 +301,8 @@ func (r *AutoIndexerReconciler) handleScheduledPhase(ctx context.Context, autoIn
 		return nil
 	}
 
-	if autoIndexerObj.Annotations["autoindexer.kaito.dev/drift-detected"] == "true" {
-		delete(autoIndexerObj.Annotations, "autoindexer.kaito.dev/drift-detected")
+	if autoIndexerObj.Annotations["autoindexer.kaito.sh/drift-detected"] == "true" {
+		delete(autoIndexerObj.Annotations, "autoindexer.kaito.sh/drift-detected")
 		r.updateStatus(ctx, autoIndexerObj, autoindexerv1alpha1.AutoIndexerPhaseDriftRemediation, "DriftDetected", "Drift detected, entering remediation phase", nil)
 	}
 
@@ -369,6 +369,16 @@ func (r *AutoIndexerReconciler) handleFailedPhase(ctx context.Context, autoIndex
 func (r *AutoIndexerReconciler) handleDriftRemediationPhase(ctx context.Context, autoIndexerObj *autoindexerv1alpha1.AutoIndexer) error {
 	r.Log.Info("Handling DriftRemediation phase", "AutoIndexer", autoIndexerObj.Name)
 
+	if autoIndexerObj.Annotations["autoindexer.kaito.sh/drift-detected"] == "true" {
+		r.Log.Info("Removing drift detected annotation", "AutoIndexer", autoIndexerObj.Name)
+		err := r.clearDriftAnnotations(ctx, autoIndexerObj)
+		if err != nil {
+			r.Log.Error(err, "failed to clear drift annotations", "AutoIndexer", autoIndexerObj.Name)
+			return err
+		}
+		return nil
+	}
+
 	runningJobs, _, _, _, err := r.getJobStatus(ctx, autoIndexerObj)
 	if err != nil {
 		r.Log.Error(err, "failed to get job status", "AutoIndexer", autoIndexerObj.Name)
@@ -387,7 +397,7 @@ func (r *AutoIndexerReconciler) handleDriftRemediationPhase(ctx context.Context,
 
 	indexFound := false
 	for _, index := range indexes {
-		if strings.EqualFold(index, autoIndexerObj.Name) {
+		if strings.EqualFold(index, autoIndexerObj.Spec.IndexName) {
 			indexFound = true
 			break
 		}

@@ -229,7 +229,7 @@ func (d *DriftDetectorImpl) setDriftDetected(ctx context.Context, autoIndexer *a
 	if autoIndexer.Annotations == nil {
 		autoIndexer.Annotations = make(map[string]string)
 	}
-	autoIndexer.Annotations["autoindexer.kaito.dev/drift-detected"] = "true"
+	autoIndexer.Annotations["autoindexer.kaito.sh/drift-detected"] = "true"
 	err := d.client.Update(ctx, autoIndexer)
 	if err != nil {
 		return fmt.Errorf("failed to set annotation for AutoIndexer: %w", err)

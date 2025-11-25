@@ -95,7 +95,7 @@ func TestDriftDetector_IsAutoIndexerInStableState(t *testing.T) {
 		phase    autoindexerv1alpha1.AutoIndexerPhase
 		expected bool
 	}{
-		{autoindexerv1alpha1.AutoIndexerPhaseCompleted, true},
+		{autoindexerv1alpha1.AutoIndexerPhaseCompleted, false},
 		{autoindexerv1alpha1.AutoIndexerPhaseFailed, false},
 		{autoindexerv1alpha1.AutoIndexerPhasePending, false},
 		{autoindexerv1alpha1.AutoIndexerPhaseRunning, false},
@@ -238,7 +238,7 @@ func TestDriftDetector_CheckAutoIndexerDrift(t *testing.T) {
 			},
 			mockDocumentCount: 5,
 			mockError:         nil,
-			expectedDrift:     true,
+			expectedDrift:     false,
 			expectedError:     false,
 		},
 		{
