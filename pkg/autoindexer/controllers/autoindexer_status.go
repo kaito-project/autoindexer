@@ -51,7 +51,13 @@ func (r *AutoIndexerReconciler) setAutoIndexerCondition(autoIndexerObj *autoinde
 }
 
 func (r *AutoIndexerReconciler) patchAndReturn(ctx context.Context, obj, original *autoindexerv1alpha1.AutoIndexer, result ctrl.Result, err error) (ctrl.Result, error) {
-	if !equality.Semantic.DeepEqual(original.Status, obj.Status) {
+	if !equality.Semantic.DeepEqual(original.Spec, obj.Spec) || !equality.Semantic.DeepEqual(original.Annotations, obj.Annotations) {
+		// Spec changed, patch the whole object
+		if patchErr := r.Patch(ctx, obj, client.MergeFrom(original)); patchErr != nil {
+			return ctrl.Result{}, patchErr
+		}
+	} else if !equality.Semantic.DeepEqual(original.Status, obj.Status) {
+		// Only status changed, patch the status subresource
 		if patchErr := r.Status().Patch(ctx, obj, client.MergeFrom(original)); patchErr != nil {
 			return ctrl.Result{}, patchErr
 		}
