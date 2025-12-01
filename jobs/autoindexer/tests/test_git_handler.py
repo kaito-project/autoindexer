@@ -142,19 +142,6 @@ class TestGitDataSourceHandler:
         # Should index non-excluded files
         assert handler._should_index_file("src/main.go") is True
 
-    def test_generate_document_id(self, basic_config, mock_rag_client, mock_autoindexer_client):
-        """Test document ID generation."""
-        handler = GitDataSourceHandler(
-            index_name="test-index",
-            config=basic_config,
-            rag_client=mock_rag_client,
-            autoindexer_client=mock_autoindexer_client
-        )
-        
-        doc_id = handler._generate_document_id("src/main.py")
-        expected = "test-autoindexer_https___github.com_test_repo.git_src_main.py"
-        assert doc_id == expected
-
     def test_get_content_type(self, basic_config, mock_rag_client, mock_autoindexer_client):
         """Test content type detection."""
         handler = GitDataSourceHandler(

@@ -168,12 +168,15 @@ class AutoIndexerJob:
                 if not self.datasource_config:
                     self.datasource_config = {}
                 
+                # Make sure autoindexer_name includes namespace for uniqueness
+                autoindexer_full_name = f"{self.namespace}_{self.autoindexer_name}"
+                
                 # Add specific data source configurations based on type
                 if ds_config.get("git") and ds_config["type"] == "Git":
                     git_config = ds_config["git"]
 
                     self.datasource_config.update({
-                        "autoindexer_name": self.autoindexer_name,
+                        "autoindexer_name": autoindexer_full_name,
                         "repository": git_config.get("repository"),
                         "branch": git_config.get("branch", "main"),
                         "commit": git_config.get("commit"),
@@ -186,7 +189,7 @@ class AutoIndexerJob:
                 elif ds_config.get("static") and ds_config["type"] == "Static":
                     static_config = ds_config["static"]
                     self.datasource_config.update({
-                        "autoindexer_name": self.autoindexer_name,
+                        "autoindexer_name": autoindexer_full_name,
                         "urls": static_config.get("urls", [])
                     })
                     logger.info("Updated Static data source configuration from CRD")
@@ -209,9 +212,7 @@ class AutoIndexerJob:
         
         try:
             logger.info("Starting document indexing process")
-            
-            # Update phase and status to indicate we're starting
-            self._update_indexing_phase("Running")
+
             self._update_status_condition("AutoIndexerIndexing", "True", "IndexingStarted", "Document indexing process has started")
 
             # Update the index and check for errors
@@ -224,9 +225,10 @@ class AutoIndexerJob:
             
             # Get document count
             try:
-                documents_response = self.rag_client.list_documents(self.index_name, metadata_filter={"autoindexer": self.autoindexer_name}, limit=1)
+                documents_response = self.rag_client.list_documents(index_name=self.index_name, metadata_filter={"autoindexer": f"{self.namespace}_{self.autoindexer_name}"}, limit=1)
                 document_count = documents_response.total_items
-            except Exception:
+            except Exception as e:
+                logger.error(f"Failed to get document count: {e}")
                 document_count = 0
             
             # Check if there were any errors during indexing
@@ -251,9 +253,10 @@ class AutoIndexerJob:
 
             # Try to get document count even in failure case
             try:
-                documents_response = self.rag_client.list_documents(self.index_name, metadata_filter={"autoindexer": self.autoindexer_name}, limit=1)
-                document_count = documents_response.get("total", 0)
-            except Exception:
+                documents_response = self.rag_client.list_documents(index_name=self.index_name, metadata_filter={"autoindexer": f"{self.namespace}_{self.autoindexer_name}"}, limit=1)
+                document_count = documents_response.total_items
+            except Exception as e:
+                logger.error(f"Failed to get document count: {e}")
                 document_count = 0
                 
             self._update_indexing_completion(False, duration_seconds, document_count, None)
@@ -321,16 +324,6 @@ class AutoIndexerJob:
                 logger.warning(f"Failed to update indexing progress: {e}")
         else:
             logger.debug(f"Progress update (no K8s client): {processed_documents}/{total_documents} documents processed")
-
-    def _update_indexing_phase(self, phase: str):
-        """Update indexing phase in the AutoIndexer CRD if Kubernetes client is available."""
-        if self.k8s_client:
-            try:
-                self.k8s_client.update_indexing_phase(phase)
-            except Exception as e:
-                logger.warning(f"Failed to update indexing phase: {e}")
-        else:
-            logger.debug(f"Phase update (no K8s client): {phase}")
 
     def _update_indexing_completion(self, success: bool, duration_seconds: int, document_count: int, commit_hash: str | None = None):
         """Update status when indexing completes."""

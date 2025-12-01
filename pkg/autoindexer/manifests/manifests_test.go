@@ -19,6 +19,7 @@ import (
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/kaito-project/autoindexer/api/v1alpha1"
@@ -34,7 +35,7 @@ func createTestAutoIndexer(name, namespace string, schedule *string) *v1alpha1.A
 			RAGEngine: "test-ragengine",
 			IndexName: "test-index",
 			DataSource: v1alpha1.DataSourceSpec{
-				Type: v1alpha1.DataSourceTypeGitHub,
+				Type: v1alpha1.DataSourceTypeGit,
 				Git: &v1alpha1.GitDataSourceSpec{
 					Repository: "https://github.com/example/test-repo",
 					Branch:     "main",
@@ -306,4 +307,327 @@ func TestGetDefaultJobConfig(t *testing.T) {
 	if config.JobName == "" {
 		t.Error("Default config should generate a job name")
 	}
+}
+
+func TestGetJobImageConfig(t *testing.T) {
+	config := GetJobImageConfig()
+
+	// Should return a valid image config
+	if config.RegistryName == "" {
+		t.Error("RegistryName should not be empty")
+	}
+
+	if config.ImageName == "" {
+		t.Error("ImageName should not be empty")
+	}
+
+	if config.ImageTag == "" {
+		t.Error("ImageTag should not be empty")
+	}
+
+	// Test that GetImage() method works
+	image := config.GetImage()
+	if image == "" {
+		t.Error("GetImage() should return a non-empty string")
+	}
+
+	// Image should contain registry, name, and tag
+	if !strings.Contains(image, config.RegistryName) {
+		t.Errorf("Image should contain registry name %s", config.RegistryName)
+	}
+}
+
+func TestGenerateEnvironmentVariables(t *testing.T) {
+	autoIndexer := createTestAutoIndexer("test", "default", nil)
+
+	envVars := generateEnvironmentVariables(autoIndexer)
+
+	// Check that required environment variables are present
+	envMap := make(map[string]string)
+	var hasAccessSecret bool
+	for _, env := range envVars {
+		if env.Value != "" {
+			envMap[env.Name] = env.Value
+		}
+		if env.Name == EnvAccessSecret {
+			hasAccessSecret = true
+		}
+	}
+
+	if envMap[EnvNamespace] != autoIndexer.Namespace {
+		t.Errorf("Expected namespace %s, got %s", autoIndexer.Namespace, envMap[EnvNamespace])
+	}
+
+	if envMap[EnvAutoIndexerName] != autoIndexer.Name {
+		t.Errorf("Expected autoindexer name %s, got %s", autoIndexer.Name, envMap[EnvAutoIndexerName])
+	}
+
+	// ACCESS_SECRET should be present when credentials are configured
+	if !hasAccessSecret {
+		t.Error("ACCESS_SECRET should be present when credentials are configured")
+	}
+}
+
+func TestGenerateRAGEngineEndpoint(t *testing.T) {
+	autoIndexer := createTestAutoIndexer("test", "default", nil)
+
+	endpoint := generateRAGEngineEndpoint(autoIndexer)
+
+	// Should generate a proper endpoint URL
+	expectedEndpoint := "http://test-ragengine.default.svc.cluster.local:80"
+	if endpoint != expectedEndpoint {
+		t.Errorf("Expected endpoint %s, got %s", expectedEndpoint, endpoint)
+	}
+}
+
+func TestGenerateDataSourceConfig(t *testing.T) {
+	tests := []struct {
+		name       string
+		dataSource v1alpha1.DataSourceSpec
+		wantErr    bool
+	}{
+		{
+			name: "git data source",
+			dataSource: v1alpha1.DataSourceSpec{
+				Type: v1alpha1.DataSourceTypeGit,
+				Git: &v1alpha1.GitDataSourceSpec{
+					Repository: "https://github.com/example/test-repo",
+					Branch:     "main",
+					Paths:      []string{"docs/"},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "static data source",
+			dataSource: v1alpha1.DataSourceSpec{
+				Type: v1alpha1.DataSourceTypeStatic,
+				Static: &v1alpha1.StaticDataSourceSpec{
+					URLs: []string{"https://example.com/file1.txt", "https://example.com/file2.txt"},
+				},
+			},
+			wantErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			config, err := generateDataSourceConfig(tt.dataSource)
+
+			if err != nil {
+				t.Fatalf("Unexpected error: %v", err)
+			}
+
+			if config == "" {
+				t.Error("Config should not be empty")
+			}
+
+			// Config should be valid JSON
+			if !strings.Contains(config, "{") {
+				t.Error("Config should be JSON format")
+			}
+		})
+	}
+}
+
+func TestGetJobLabels(t *testing.T) {
+	autoIndexer := createTestAutoIndexer("test", "default", nil)
+
+	labels := getJobLabels(autoIndexer)
+
+	// Check required labels are present
+	if labels[LabelAutoIndexerName] != autoIndexer.Name {
+		t.Errorf("Expected label %s=%s, got %s", LabelAutoIndexerName, autoIndexer.Name, labels[LabelAutoIndexerName])
+	}
+
+	if labels[LabelAutoIndexerNamespace] != autoIndexer.Namespace {
+		t.Errorf("Expected label %s=%s, got %s", LabelAutoIndexerNamespace, autoIndexer.Namespace, labels[LabelAutoIndexerNamespace])
+	}
+
+	if labels[LabelDataSourceType] != string(autoIndexer.Spec.DataSource.Type) {
+		t.Errorf("Expected label %s=%s, got %s", LabelDataSourceType, autoIndexer.Spec.DataSource.Type, labels[LabelDataSourceType])
+	}
+}
+
+func TestGetResourceRequirements(t *testing.T) {
+	tests := []struct {
+		name   string
+		limits *corev1.ResourceRequirements
+	}{
+		{
+			name:   "nil limits - should use defaults",
+			limits: nil,
+		},
+		{
+			name: "custom limits provided - should return as-is",
+			limits: &corev1.ResourceRequirements{
+				Limits: corev1.ResourceList{
+					corev1.ResourceCPU:    mustParseQuantity("1000m"),
+					corev1.ResourceMemory: mustParseQuantity("512Mi"),
+				},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := getResourceRequirements(tt.limits)
+
+			if tt.limits == nil {
+				// Should return defaults
+				expectedCPU := mustParseQuantity("100m")
+				expectedMemory := mustParseQuantity("256Mi")
+
+				if !result.Requests.Cpu().Equal(expectedCPU) {
+					t.Errorf("Expected CPU request %v, got %v", expectedCPU, result.Requests.Cpu())
+				}
+
+				if !result.Requests.Memory().Equal(expectedMemory) {
+					t.Errorf("Expected memory request %v, got %v", expectedMemory, result.Requests.Memory())
+				}
+			} else {
+				// Should return the provided limits as-is
+				if tt.limits.Limits != nil {
+					if !result.Limits.Cpu().Equal(tt.limits.Limits[corev1.ResourceCPU]) {
+						t.Errorf("Expected CPU limit %v, got %v", tt.limits.Limits[corev1.ResourceCPU], result.Limits.Cpu())
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestGenerateSpecHash(t *testing.T) {
+	autoIndexer := createTestAutoIndexer("test", "default", nil)
+
+	hash1 := generateSpecHash(autoIndexer.Spec)
+	hash2 := generateSpecHash(autoIndexer.Spec)
+
+	// Same spec should generate same hash
+	if hash1 != hash2 {
+		t.Error("Same spec should generate same hash")
+	}
+
+	// Different spec should generate different hash
+	autoIndexer.Spec.IndexName = "different-index"
+	hash3 := generateSpecHash(autoIndexer.Spec)
+	if hash1 == hash3 {
+		t.Error("Different spec should generate different hash")
+	}
+
+	// Hash should be reasonable length (truncated to 8 chars)
+	if len(hash1) != 8 {
+		t.Errorf("Expected hash length 8, got %d", len(hash1))
+	}
+}
+
+func TestGenerateServiceAccountName(t *testing.T) {
+	autoIndexer := createTestAutoIndexer("test-ai", "default", nil)
+
+	name := GenerateServiceAccountName(autoIndexer)
+
+	expectedName := "test-ai-job-sa"
+	if name != expectedName {
+		t.Errorf("Expected name %s, got %s", expectedName, name)
+	}
+}
+
+func TestGenerateRoleName(t *testing.T) {
+	autoIndexer := createTestAutoIndexer("test-ai", "default", nil)
+
+	name := GenerateRoleName(autoIndexer)
+
+	expectedName := "test-ai-job-access"
+	if name != expectedName {
+		t.Errorf("Expected name %s, got %s", expectedName, name)
+	}
+}
+
+func TestGenerateRoleBindingName(t *testing.T) {
+	autoIndexer := createTestAutoIndexer("test-ai", "default", nil)
+
+	name := GenerateRoleBindingName(autoIndexer)
+
+	expectedName := "test-ai-job-access-binding"
+	if name != expectedName {
+		t.Errorf("Expected name %s, got %s", expectedName, name)
+	}
+}
+
+func TestGenerateServiceAccountManifest(t *testing.T) {
+	autoIndexer := createTestAutoIndexer("test", "default", nil)
+
+	sa := GenerateServiceAccountManifest(autoIndexer)
+
+	if sa.Name == "" {
+		t.Error("ServiceAccount name should not be empty")
+	}
+
+	if sa.Namespace != autoIndexer.Namespace {
+		t.Errorf("Expected namespace %s, got %s", autoIndexer.Namespace, sa.Namespace)
+	}
+
+	// Check labels
+	if sa.Labels[LabelAutoIndexerName] != autoIndexer.Name {
+		t.Errorf("Expected label %s=%s", LabelAutoIndexerName, autoIndexer.Name)
+	}
+}
+
+func TestGenerateRoleManifest(t *testing.T) {
+	autoIndexer := createTestAutoIndexer("test", "default", nil)
+
+	role := GenerateRoleManifest(autoIndexer)
+
+	if role.Name == "" {
+		t.Error("Role name should not be empty")
+	}
+
+	if role.Namespace != autoIndexer.Namespace {
+		t.Errorf("Expected namespace %s, got %s", autoIndexer.Namespace, role.Namespace)
+	}
+
+	// Check that role has some rules
+	if len(role.Rules) == 0 {
+		t.Error("Role should have at least one rule")
+	}
+
+	// Check labels
+	if role.Labels[LabelAutoIndexerName] != autoIndexer.Name {
+		t.Errorf("Expected label %s=%s", LabelAutoIndexerName, autoIndexer.Name)
+	}
+}
+
+func TestAddCredentialsMounts(t *testing.T) {
+	autoIndexer := createTestAutoIndexer("test", "default", nil)
+	config := GetDefaultJobConfig(autoIndexer, JobTypeOneTime)
+	job := GenerateIndexingJobManifest(config)
+
+	// Count volumes and volume mounts before
+	volumesBefore := len(job.Spec.Template.Spec.Volumes)
+	mountsBefore := len(job.Spec.Template.Spec.Containers[0].VolumeMounts)
+
+	// Add credentials
+	addCredentialsMounts(job, autoIndexer.Spec.Credentials)
+
+	// Count volumes and volume mounts after
+	volumesAfter := len(job.Spec.Template.Spec.Volumes)
+	mountsAfter := len(job.Spec.Template.Spec.Containers[0].VolumeMounts)
+
+	// Should have added volume and mount
+	if volumesAfter <= volumesBefore {
+		t.Error("Should have added a volume for credentials")
+	}
+
+	if mountsAfter <= mountsBefore {
+		t.Error("Should have added a volume mount for credentials")
+	}
+}
+
+// Helper function for resource quantities
+func mustParseQuantity(str string) resource.Quantity {
+	q, err := resource.ParseQuantity(str)
+	if err != nil {
+		panic(err)
+	}
+	return q
 }

@@ -164,6 +164,8 @@ class GitDataSourceHandler(DataSourceHandler):
                 try:
                     self.repo.git.checkout(self.branch)
                     logger.info(f"Checked out branch: {self.branch}")
+                    self.repo.remotes.origin.fetch()
+                    self.repo.git.pull()
                 except git.exc.GitCommandError as e:
                     logger.warning(f"Failed to checkout branch {self.branch}: {e}")
                     # Continue with default branch
@@ -175,9 +177,7 @@ class GitDataSourceHandler(DataSourceHandler):
                     logger.info(f"Checked out commit: {self.commit}")
                 except git.exc.GitCommandError as e:
                     raise DataSourceError(f"Failed to checkout commit {self.commit}: {e}")
-            
-            self.repo.remotes.origin.fetch()
-            self.repo.git.pull()
+
             # Capture the current commit hash for later use
             self.current_commit_hash = self.repo.head.commit.hexsha
             logger.info(f"Current commit hash: {self.current_commit_hash}")
@@ -248,30 +248,54 @@ class GitDataSourceHandler(DataSourceHandler):
                         
                 elif diff_item.change_type == 'M':  # Modified
                     content = self._read_file_content(file_path)
-                    if content:
+                    if not content:
+                        continue
+                    list_resp = self.rag_client.list_documents(index_name=self.index_name, metadata_filter={"file_path": file_path}, limit=1)
+                    if list_resp and list_resp.documents:
                         doc = self._create_document(file_path, content, "modified")
+                        doc.doc_id = list_resp.documents[0].doc_id
                         update_docs.append(doc)
+                    else:
+                        logger.warning(f"Failed to fetch file from rag {file_path} for update, indexing as new document")
+                        doc = self._create_document(file_path, content, "added")
+                        create_docs.append(doc)
                         
                 elif diff_item.change_type == 'D':  # Deleted
-                    doc_id = self._generate_document_id(file_path)
-                    delete_doc_ids.append(doc_id)
+                    list_resp = self.rag_client.list_documents(index_name=self.index_name, metadata_filter={"file_path": file_path}, limit=1)
+                    if not list_resp or not list_resp.documents:
+                        logger.warning(f"Failed to fetch file from rag {file_path} for deletion")
+                        continue
+                    delete_doc_ids.append(list_resp.documents[0].doc_id)
                     
                 elif diff_item.change_type == 'R':  # Renamed
                     # Delete old document and create new one
-                    if diff_item.a_path:
-                        old_doc_id = self._generate_document_id(diff_item.a_path)
-                        delete_doc_ids.append(old_doc_id)
-                    
                     content = self._read_file_content(file_path)
-                    if content:
-                        doc = self._create_document(file_path, content, "renamed")
-                        create_docs.append(doc)
+                    if not content:
+                        continue
+                    if diff_item.a_path:
+                        list_resp = self.rag_client.list_documents(index_name=self.index_name, metadata_filter={"file_path": diff_item.a_path}, limit=1)
+                        if list_resp and list_resp.documents:
+                            doc = self._create_document(file_path, content, "renamed")
+                            doc.doc_id = list_resp.documents[0].doc_id
+                            update_docs.append(doc)
+                        else:
+                            logger.warning(f"Failed to fetch file from rag {diff_item.a_path} for renaming, indexing as new document")
+                
+                if len(create_docs) >= 10:
+                    self._index_documents_batch(create_docs)
+                    create_docs = []
+                if len(update_docs) >= 10:
+                    self._update_documents_batch(update_docs)
+                    update_docs = []
+                if len(delete_doc_ids) >= 10:
+                    self._delete_documents_batch(delete_doc_ids)
+                    delete_doc_ids = []
             
             # Process all changes
             if create_docs:
                 self._index_documents_batch(create_docs)
             if update_docs:
-                self._index_documents_batch(update_docs)
+                self._update_documents_batch(update_docs)
             if delete_doc_ids:
                 self._delete_documents_batch(delete_doc_ids)
                 
@@ -400,10 +424,6 @@ class GitDataSourceHandler(DataSourceHandler):
         
         return doc
 
-    def _generate_document_id(self, file_path: str) -> str:
-        """Generate a unique document ID for a file."""
-        return f"{self.autoindexer_name}:{self.repository}:{file_path}".replace("/", "_").replace(":", "_")
-
     def _index_documents_batch(self, documents: list[Document]):
         """Index a batch of documents."""
         try:
@@ -411,6 +431,16 @@ class GitDataSourceHandler(DataSourceHandler):
             self.rag_client.index_documents(index_name=self.index_name, documents=documents)
         except Exception as e:
             error_msg = f"Failed to index document batch: {e}"
+            logger.error(error_msg)
+            self.errors.append(error_msg)
+    
+    def _update_documents_batch(self, documents: list[Document]):
+        """Update a batch of documents."""
+        try:
+            logger.info(f"Updating batch of {len(documents)} documents in index '{self.index_name}'")
+            self.rag_client.update_documents(index_name=self.index_name, documents=documents)
+        except Exception as e:
+            error_msg = f"Failed to update document batch: {e}"
             logger.error(error_msg)
             self.errors.append(error_msg)
 
@@ -446,5 +476,5 @@ class GitDataSourceHandler(DataSourceHandler):
         if self.current_commit_hash:
             status_update["lastIndexedCommit"] = self.current_commit_hash
 
-        if not self.autoindexer_client.update_autoindexer_status(status_update, update_success_or_failure=True):
+        if not self.autoindexer_client.update_autoindexer_status(status_update):
             logger.error("Failed to update AutoIndexer status")

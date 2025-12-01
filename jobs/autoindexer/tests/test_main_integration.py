@@ -123,7 +123,7 @@ class TestAutoIndexerJob:
                 
                 # Verify static handler was created with expected config
                 expected_config = {
-                    "autoindexer_name": "test-autoindexer",
+                    "autoindexer_name": "test-namespace_test-autoindexer",
                     "urls": ["https://example.com/doc.txt"]
                 }
                 mock_static_handler.assert_called_once_with(
@@ -246,8 +246,6 @@ class TestAutoIndexerJob:
             assert result is True
             
             # Verify status updates were called
-            service.k8s_client.update_indexing_phase.assert_called()
-            service.k8s_client.add_status_condition.assert_called()
             service.k8s_client.update_indexing_completion.assert_called_with(True, 30, 5, None)
             
             # Verify indexing was performed
@@ -390,13 +388,11 @@ class TestAutoIndexerJob:
             # These should not raise exceptions, just log warnings
             service._update_status_condition("Test", "True", "Reason", "Message")
             service._update_indexing_progress(10, 5)
-            service._update_indexing_phase("Running")
             service._update_indexing_completion(True, 30, 5)
             
             # Verify methods were called despite errors
             mock_k8s_client.add_status_condition.assert_called()
             mock_k8s_client.update_indexing_progress.assert_called()
-            mock_k8s_client.update_indexing_phase.assert_called()
             mock_k8s_client.update_indexing_completion.assert_called()
 
     def test_apply_crd_config_git_source(self, valid_env_vars, mock_rag_client, mock_git_handler):

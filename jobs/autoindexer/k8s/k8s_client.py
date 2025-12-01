@@ -97,13 +97,12 @@ class AutoIndexerK8sClient:
                 logger.error(f"Failed to get AutoIndexer {self.namespace}/{self.autoindexer_name}: {e}")
                 raise
 
-    def update_autoindexer_status(self, status_update: dict[str, Any], update_success_or_failure: bool = False) -> bool:
+    def update_autoindexer_status(self, status_update: dict[str, Any]) -> bool:
         """
         Update the status of an AutoIndexer CRD.
         
         Args:
             status_update: Dictionary containing status updates
-            update_success_or_failure: Whether to update success/failure counters
             
         Returns:
             bool: True if successful, False otherwise
@@ -126,12 +125,6 @@ class AutoIndexerK8sClient:
                 current["status"] = {}
             
             current["status"].update(status_update)
-
-            if update_success_or_failure:
-                if status_update.get("indexingPhase") == "Completed":
-                    current["status"]["successfulIndexingCount"] = current["status"].get("successfulIndexingCount", 0) + 1
-                elif status_update.get("indexingPhase") == "Failed":
-                    current["status"]["errorIndexingCount"] = current["status"].get("errorIndexingCount", 0) + 1
             
             # Patch the status subresource
             self.custom_api.patch_namespaced_custom_object_status(
@@ -186,6 +179,8 @@ class AutoIndexerK8sClient:
             if "conditions" not in current["status"]:
                 current["status"]["conditions"] = []
             
+            observed_generation = current.get("metadata", {}).get("generation", 0)
+            
             # Create new condition
             now = datetime.now(UTC).isoformat().replace("+00:00", "Z")
             
@@ -196,13 +191,13 @@ class AutoIndexerK8sClient:
                 if condition.get("type") == condition_type:
                     # Update existing condition
                     transition_time = now if condition.get("status") != status else condition.get("lastTransitionTime", now)
-                    conditions[i] = self._create_condition(condition_type, status, reason, message, transition_time)
+                    conditions[i] = self._create_condition(condition_type, status, reason, message, last_transition_time=transition_time, observed_generation=observed_generation)
                     found = True
                     break
             
             if not found:
                 # Add new condition
-                new_condition = self._create_condition(condition_type, status, reason, message, now)
+                new_condition = self._create_condition(condition_type, status, reason, message, last_transition_time=now, observed_generation=observed_generation)
                 conditions.append(new_condition)
             
             # Update the status
@@ -222,7 +217,7 @@ class AutoIndexerK8sClient:
             logger.error(f"Failed to add condition to AutoIndexer: {e}")
             return False
 
-    def _create_condition(self, condition_type: str, status: str, reason: str, message: str, last_transition_time: str | None = None) -> dict[str, str]:
+    def _create_condition(self, condition_type: str, status: str, reason: str, message: str, last_transition_time: str | None = None, observed_generation: int | None = None) -> dict[str, str]:
         """
         Create a condition dictionary structure.
         
@@ -244,7 +239,8 @@ class AutoIndexerK8sClient:
             "status": status,
             "reason": reason,
             "message": message,
-            "lastTransitionTime": last_transition_time
+            "lastTransitionTime": last_transition_time,
+            "observedGeneration": observed_generation if observed_generation is not None else 0
         }
 
     def update_indexing_progress(self, total_documents: int) -> bool:
@@ -263,28 +259,6 @@ class AutoIndexerK8sClient:
         }
 
         return self.update_autoindexer_status(progress_update)
-
-    def update_indexing_phase(self, phase: str) -> bool:
-        """
-        Update the indexing phase in the AutoIndexer status.
-        
-        Args:
-            phase: Indexing phase - should be one of:
-                - "Pending"
-                - "Running" 
-                - "Completed"
-                - "Failed"
-                - "Retrying"
-                - "Unknown"
-            
-        Returns:
-            bool: True if successful, False otherwise
-        """
-        phase_update = {
-            "indexingPhase": phase
-        }
-
-        return self.update_autoindexer_status(phase_update)
 
     def update_indexing_completion(self, success: bool, duration_seconds: int, document_count: int, commit_hash: str | None = None) -> bool:
         """
@@ -305,7 +279,6 @@ class AutoIndexerK8sClient:
             "lastIndexingTimestamp": now,
             "lastIndexingDurationSeconds": duration_seconds,
             "numOfDocumentInIndex": document_count,
-            "indexingPhase": "Completed" if success else "Failed"
         }
         
         if success:

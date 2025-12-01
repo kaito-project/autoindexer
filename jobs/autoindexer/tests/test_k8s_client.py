@@ -336,22 +336,6 @@ class TestAutoIndexerK8sClient:
             assert result is True
             mock_custom_api.patch_namespaced_custom_object_status.assert_called_once()
 
-    def test_update_indexing_phase(self, mock_k8s_config, mock_custom_api, mock_core_api, sample_autoindexer_crd):
-        """Test updating indexing phase."""
-        mock_k8s_config.load_incluster_config.return_value = None
-        mock_k8s_config.ConfigException = Exception
-        
-        mock_custom_api.get_namespaced_custom_object.return_value = sample_autoindexer_crd.copy()
-        mock_custom_api.patch_namespaced_custom_object_status.return_value = sample_autoindexer_crd
-        
-        with patch('autoindexer.k8s.k8s_client.NAMESPACE', 'default'), \
-             patch('autoindexer.k8s.k8s_client.AUTOINDEXER_NAME', 'test-autoindexer'):
-            client = AutoIndexerK8sClient()
-            
-            result = client.update_indexing_phase("Running")
-            
-            assert result is True
-
     def test_update_indexing_completion_success(self, mock_k8s_config, mock_custom_api, mock_core_api, sample_autoindexer_crd):
         """Test updating indexing completion for success."""
         mock_k8s_config.load_incluster_config.return_value = None

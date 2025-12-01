@@ -18,6 +18,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"os"
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -64,6 +65,32 @@ type JobConfig struct {
 	ServiceAccountName string // ServiceAccount for RBAC
 }
 
+type ImageConfig struct {
+	RegistryName string
+	ImageName    string
+	ImageTag     string
+}
+
+func (ic ImageConfig) GetImage() string {
+	return fmt.Sprintf("%s/%s:%s", ic.RegistryName, ic.ImageName, ic.ImageTag)
+}
+
+func GetJobImageConfig() ImageConfig {
+	return ImageConfig{
+		RegistryName: getEnv("AUTO_INDEXER_JOB_REGISTRY_NAME", "mcr.microsoft.com/aks/kaito"),
+		ImageName:    getEnv("AUTO_INDEXER_JOB_IMAGE_NAME", "kaito-autoindexer"),
+		ImageTag:     getEnv("AUTO_INDEXER_JOB_IMAGE_TAG", "0.6.0"),
+	}
+}
+
+func getEnv(key, defaultValue string) string {
+	value := os.Getenv(key)
+	if value == "" {
+		return defaultValue
+	}
+	return value
+}
+
 // GenerateIndexingJobManifest creates a Job manifest for document indexing
 func GenerateIndexingJobManifest(config JobConfig) *batchv1.Job {
 	labels := getJobLabels(config.AutoIndexer)
@@ -74,7 +101,7 @@ func GenerateIndexingJobManifest(config JobConfig) *batchv1.Job {
 			Namespace: config.AutoIndexer.Namespace,
 			Labels:    labels,
 			Annotations: map[string]string{
-				"autoindexer.kaito.io/spec-hash": generateSpecHash(config.AutoIndexer.Spec),
+				"autoindexer.kaito.sh/spec-hash": generateSpecHash(config.AutoIndexer.Spec),
 			},
 			OwnerReferences: []metav1.OwnerReference{
 				*metav1.NewControllerRef(config.AutoIndexer, v1alpha1.GroupVersion.WithKind("AutoIndexer")),
@@ -121,7 +148,7 @@ func GenerateIndexingCronJobManifest(config JobConfig) *batchv1.CronJob {
 			Namespace: config.AutoIndexer.Namespace,
 			Labels:    labels,
 			Annotations: map[string]string{
-				"autoindexer.kaito.io/spec-hash": generateSpecHash(config.AutoIndexer.Spec),
+				"autoindexer.kaito.sh/spec-hash": generateSpecHash(config.AutoIndexer.Spec),
 			},
 			OwnerReferences: []metav1.OwnerReference{
 				*metav1.NewControllerRef(config.AutoIndexer, v1alpha1.GroupVersion.WithKind("AutoIndexer")),
@@ -212,7 +239,7 @@ func generateDataSourceConfig(dataSource v1alpha1.DataSourceSpec) (string, error
 	}
 
 	switch dataSource.Type {
-	case v1alpha1.DataSourceTypeGitHub:
+	case v1alpha1.DataSourceTypeGit:
 		if dataSource.Git != nil {
 			config["git"] = map[string]interface{}{
 				"repository":   dataSource.Git.Repository,

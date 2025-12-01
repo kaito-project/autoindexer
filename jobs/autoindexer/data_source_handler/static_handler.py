@@ -85,7 +85,7 @@ class StaticDataSourceHandler(DataSourceHandler):
             indexing_duration_seconds=self.total_time.seconds if self.total_time else 0
         )
 
-        if not self.autoindexer_client.update_autoindexer_status(status_update, update_success_or_failure=True):
+        if not self.autoindexer_client.update_autoindexer_status(status_update):
             logger.error("Failed to update AutoIndexer status")
 
 

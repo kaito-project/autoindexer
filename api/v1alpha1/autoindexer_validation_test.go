@@ -147,7 +147,7 @@ func TestAutoIndexer_Validate(t *testing.T) {
 	validSpec := AutoIndexerSpec{
 		RAGEngine:  "rag",
 		IndexName:  "my-index",
-		DataSource: DataSourceSpec{Type: DataSourceTypeGitHub, Git: validGit},
+		DataSource: DataSourceSpec{Type: DataSourceTypeGit, Git: validGit},
 	}
 	valid := &AutoIndexer{
 		ObjectMeta: metav1.ObjectMeta{Name: "ai", Namespace: "default"},

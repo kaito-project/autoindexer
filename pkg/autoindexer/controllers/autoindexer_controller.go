@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"os"
 	"reflect"
+	"strings"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -29,42 +30,73 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
-	"k8s.io/klog/v2"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	autoindexerv1alpha1 "github.com/kaito-project/autoindexer/api/v1alpha1"
+	"github.com/kaito-project/autoindexer/pkg/autoindexer/driftdetection"
 	"github.com/kaito-project/autoindexer/pkg/autoindexer/manifests"
+	"github.com/kaito-project/autoindexer/pkg/autoindexer/utils"
+	"github.com/kaito-project/autoindexer/pkg/clients/ragengine"
 	kaitov1alpha1 "github.com/kaito-project/kaito/api/v1alpha1"
 )
 
 const (
-	AutoIndexerHashAnnotation = "autoindexer.kaito.io/hash"
-	AutoIndexerNameLabel      = "autoindexer.kaito.io/name"
+	AutoIndexerHashAnnotation = "autoindexer.kaito.sh/hash"
+	AutoIndexerNameLabel      = "autoindexer.kaito.sh/name"
 )
 
 // AutoIndexerReconciler reconciles an AutoIndexer object
 type AutoIndexerReconciler struct {
 	client.Client
-	Log      logr.Logger
-	Scheme   *runtime.Scheme
-	Recorder record.EventRecorder
+	Log           logr.Logger
+	Scheme        *runtime.Scheme
+	Recorder      record.EventRecorder
+	DriftDetector driftdetection.DriftDetector
+	RAGClient     driftdetection.RAGEngineClient
 }
 
 // NewAutoIndexerReconciler creates a new AutoIndexer reconciler
 func NewAutoIndexerReconciler(client client.Client, scheme *runtime.Scheme, log logr.Logger, recorder record.EventRecorder) *AutoIndexerReconciler {
+	// Create drift detector
+	ragClient := ragengine.NewRAGEngineClient(30*time.Second, 3)
+
+	// Configure drift detection
+	driftConfig := driftdetection.DefaultDriftDetectionConfig()
+
+	// Allow configuration via environment variables
+	if intervalEnv := os.Getenv("DRIFT_DETECTION_INTERVAL"); intervalEnv != "" {
+		if interval, err := time.ParseDuration(intervalEnv); err == nil {
+			driftConfig.CheckInterval = interval
+		}
+	}
+
+	if enabledEnv := os.Getenv("DRIFT_DETECTION_ENABLED"); enabledEnv == "false" {
+		driftConfig.Enabled = false
+	}
+
+	// Create drift detector
+	driftDetector := driftdetection.NewDriftDetector(
+		client,
+		ragClient,
+		driftConfig,
+		log.WithName("drift-detector"),
+	)
+
 	return &AutoIndexerReconciler{
-		Client:   client,
-		Scheme:   scheme,
-		Log:      log,
-		Recorder: recorder,
+		Client:        client,
+		Scheme:        scheme,
+		Log:           log,
+		Recorder:      recorder,
+		DriftDetector: driftDetector,
+		RAGClient:     ragClient,
 	}
 }
 
 //+kubebuilder:rbac:groups=autoindexer.kaito.sh,resources=autoindexers,verbs=get;list;watch;update;patch
-//+kubebuilder:rbac:groups=autoindexer.kaito.sh,resources=autoindexers/status,verbs=get;list;update;patch
+//+kubebuilder:rbac:groups=autoindexer.kaito.sh,resources=autoindexers/status,verbs=get;update;patch
 //+kubebuilder:rbac:groups=batch,resources=jobs,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=batch,resources=cronjobs,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups="",resources=events,verbs=create;patch
@@ -78,86 +110,349 @@ func (r *AutoIndexerReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	autoIndexerObj := &autoindexerv1alpha1.AutoIndexer{}
 	if err := r.Client.Get(ctx, req.NamespacedName, autoIndexerObj); err != nil {
 		if !apierrors.IsNotFound(err) {
-			klog.ErrorS(err, "failed to get AutoIndexer", "AutoIndexer", req.Name)
+			r.Log.Error(err, "failed to get AutoIndexer", "AutoIndexer", req.Name)
 		}
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
-	klog.InfoS("Reconciling", "AutoIndexer", req.NamespacedName)
+	r.Log.Info("Reconciling", "AutoIndexer", req.NamespacedName)
 
 	if !autoIndexerObj.DeletionTimestamp.IsZero() {
+		r.Log.Info("AutoIndexer is being deleted, cleaning up resources", "AutoIndexer", req.NamespacedName)
 		return r.deleteAutoIndexer(ctx, autoIndexerObj)
 	}
 
-	result, err := r.addAutoIndexer(ctx, autoIndexerObj)
-	if err != nil {
-		return result, err
-	}
-
-	return result, nil
+	r.Log.Info("AutoIndexer is being created or updated", "AutoIndexer", req.NamespacedName)
+	return r.syncAutoIndexer(ctx, autoIndexerObj)
 }
 
 // addAutoIndexer handles the reconciliation logic for creating/updating AutoIndexer
-func (r *AutoIndexerReconciler) addAutoIndexer(ctx context.Context, autoIndexerObj *autoindexerv1alpha1.AutoIndexer) (ctrl.Result, error) {
-	// Validate that referenced RAGEngine exists
-	if err := r.validateRAGEngineRef(ctx, autoIndexerObj); err != nil {
-		if updateErr := r.updateStatusConditionIfNotMatch(ctx, autoIndexerObj, autoindexerv1alpha1.ConditionTypeResourceStatus, metav1.ConditionTrue,
-			"autoIndexerRAGEngineNotFound", err.Error()); updateErr != nil {
-			klog.ErrorS(updateErr, "failed to update autoindexer status", "autoindexer", klog.KObj(autoIndexerObj))
-			return ctrl.Result{}, updateErr
-		}
-		return ctrl.Result{RequeueAfter: time.Minute * 5}, err
+func (r *AutoIndexerReconciler) syncAutoIndexer(ctx context.Context, autoIndexerObj *autoindexerv1alpha1.AutoIndexer) (ctrl.Result, error) {
+	existingAutoIndexerObj := autoIndexerObj.DeepCopy()
+
+	// Always ensure required resources exist and are up to date
+	// This handles user modifications and deleted resources(rbac, service account, etc)
+	if err := r.ensureRequiredResources(ctx, autoIndexerObj); err != nil {
+		r.Log.Error(err, "failed to ensure required resources", "autoindexer", autoIndexerObj.Name)
+		return r.patchAndReturn(ctx, autoIndexerObj, existingAutoIndexerObj, ctrl.Result{}, err)
 	}
 
-	// Ensure RBAC resources exist
-	if err := r.ensureRBACResources(ctx, autoIndexerObj); err != nil {
-		if updateErr := r.updateStatusConditionIfNotMatch(ctx, autoIndexerObj, autoindexerv1alpha1.ConditionTypeResourceStatus, metav1.ConditionTrue,
-			"autoIndexerEnsureRBACFailed", err.Error()); updateErr != nil {
-			klog.ErrorS(updateErr, "failed to update autoindexer status", "autoindexer", klog.KObj(autoIndexerObj))
-			return ctrl.Result{}, updateErr
-		}
-		return ctrl.Result{}, err
+	var err error
+	// Handle reconciliation based on current phase
+	switch autoIndexerObj.Status.IndexingPhase {
+	case autoindexerv1alpha1.AutoIndexerPhasePending:
+		err = r.handlePendingPhase(ctx, autoIndexerObj)
+	case autoindexerv1alpha1.AutoIndexerPhaseScheduled:
+		err = r.handleScheduledPhase(ctx, autoIndexerObj)
+	case autoindexerv1alpha1.AutoIndexerPhaseSuspended:
+		err = r.handleSuspendedPhase(ctx, autoIndexerObj)
+	case autoindexerv1alpha1.AutoIndexerPhaseRunning:
+		err = r.handleRunningPhase(ctx, autoIndexerObj)
+	case autoindexerv1alpha1.AutoIndexerPhaseCompleted:
+		err = r.handleCompletedPhase(ctx, autoIndexerObj)
+	case autoindexerv1alpha1.AutoIndexerPhaseFailed:
+		err = r.handleFailedPhase(ctx, autoIndexerObj)
+	case autoindexerv1alpha1.AutoIndexerPhaseDriftRemediation:
+		err = r.handleDriftRemediationPhase(ctx, autoIndexerObj)
+	default:
+		// Unknown phase, set to Pending
+		r.Log.Info("Unknown phase, setting to Pending", "AutoIndexer", autoIndexerObj.Name, "phase", autoIndexerObj.Status.IndexingPhase)
+		r.updateStatus(ctx, autoIndexerObj, autoindexerv1alpha1.AutoIndexerPhasePending, "PhaseReset", "Unknown phase, resetting to Pending", nil)
 	}
 
-	// Handle scheduled vs one-time execution
-	if autoIndexerObj.Spec.Schedule != nil {
-		// Handle scheduled execution (CronJob)
-		if err := r.ensureCronJob(ctx, autoIndexerObj); err != nil {
-			if updateErr := r.updateStatusConditionIfNotMatch(ctx, autoIndexerObj, autoindexerv1alpha1.ConditionTypeResourceStatus, metav1.ConditionTrue,
-				"autoIndexerEnsureCronJobFailed", err.Error()); updateErr != nil {
-				klog.ErrorS(updateErr, "failed to update autoindexer status", "autoindexer", klog.KObj(autoIndexerObj))
-				return ctrl.Result{}, updateErr
+	// If an error occurred during phase handling, log and set condition
+	if err != nil {
+		r.Log.Error(err, "failed to reconcile", "autoindexer", autoIndexerObj.Name, "phase", autoIndexerObj.Status.IndexingPhase)
+		r.setAutoIndexerCondition(autoIndexerObj, autoindexerv1alpha1.AutoIndexerConditionTypeError, metav1.ConditionTrue, "ReconcileFailed", err.Error())
+		return r.patchAndReturn(ctx, autoIndexerObj, existingAutoIndexerObj, ctrl.Result{}, err)
+	}
+
+	// Clear error condition on successful reconciliation
+	r.setAutoIndexerCondition(autoIndexerObj, autoindexerv1alpha1.AutoIndexerConditionTypeError, metav1.ConditionFalse, "ReconcileSucceeded", "")
+	r.setAutoIndexerCondition(autoIndexerObj, autoindexerv1alpha1.ConditionTypeResourceStatus, metav1.ConditionTrue, "ReconcileSucceeded", "")
+	return r.patchAndReturn(ctx, autoIndexerObj, existingAutoIndexerObj, ctrl.Result{}, nil)
+}
+
+// getJobStatus returns counts of running, failed, and completed jobs for the AutoIndexer
+func (r *AutoIndexerReconciler) getJobStatus(ctx context.Context, autoIndexerObj *autoindexerv1alpha1.AutoIndexer) (running, failed, completed int, latestJobFailed bool, err error) {
+	jobs := &batchv1.JobList{}
+	listOpts := []client.ListOption{
+		client.InNamespace(autoIndexerObj.Namespace),
+		client.MatchingLabels{
+			"autoindexer.kaito.sh/name": autoIndexerObj.Name,
+		},
+	}
+
+	if err := r.Client.List(ctx, jobs, listOpts...); err != nil {
+		return 0, 0, 0, false, fmt.Errorf("failed to list jobs: %w", err)
+	}
+
+	latestJobFailed = false
+	lastJobTimestamp := time.Time{}
+	for _, job := range jobs.Items {
+		if lastJobTimestamp.IsZero() && !job.Status.StartTime.IsZero() {
+			lastJobTimestamp = job.Status.StartTime.Time
+		}
+		if job.Status.Active > 0 {
+			running++
+			if job.Status.StartTime != nil && job.Status.StartTime.Time.After(lastJobTimestamp) {
+				latestJobFailed = false
+				lastJobTimestamp = job.Status.StartTime.Time
 			}
-			return ctrl.Result{}, err
+		} else if job.Status.Failed > 0 {
+			failed++
+			if job.Status.StartTime != nil && job.Status.StartTime.Time.After(lastJobTimestamp) {
+				latestJobFailed = true
+				lastJobTimestamp = job.Status.StartTime.Time
+			}
+		} else if job.Status.Succeeded > 0 {
+			completed++
+			if job.Status.StartTime != nil && job.Status.StartTime.Time.After(lastJobTimestamp) {
+				latestJobFailed = false
+				lastJobTimestamp = job.Status.StartTime.Time
+			}
 		}
+	}
 
-		isScheduled := metav1.ConditionTrue
-		if autoIndexerObj.Spec.Suspend != nil && *autoIndexerObj.Spec.Suspend {
-			isScheduled = metav1.ConditionFalse
+	return running, failed, completed, latestJobFailed, nil
+}
+
+// updateStatus updates the IndexingPhase of the AutoIndexer
+func (r *AutoIndexerReconciler) updateStatus(ctx context.Context, autoIndexerObj *autoindexerv1alpha1.AutoIndexer, newPhase autoindexerv1alpha1.AutoIndexerPhase, reason, message string, newConditions []metav1.Condition) {
+	autoIndexerObj.Status.IndexingPhase = newPhase
+	for _, cond := range newConditions {
+		found := false
+		for i, existingCond := range autoIndexerObj.Status.Conditions {
+			if existingCond.Type == cond.Type {
+				autoIndexerObj.Status.Conditions[i] = cond
+				found = true
+				break
+			}
 		}
-		if err := r.updateStatusConditionIfNotMatch(ctx, autoIndexerObj, autoindexerv1alpha1.AutoIndexerConditionTypeScheduled, isScheduled,
-			"Scheduled", "AutoIndexer is scheduled successfully"); err != nil {
-			return ctrl.Result{}, err
+		if !found {
+			autoIndexerObj.Status.Conditions = append(autoIndexerObj.Status.Conditions, cond)
+		}
+	}
+
+	r.Log.Info("Updated AutoIndexer phase on struct", "AutoIndexer", autoIndexerObj.Name, "newPhase", newPhase, "reason", reason, "message", message)
+}
+
+// handlePendingPhase handles the Pending phase - determines next phase based on configuration
+// Note: Resource creation is now handled in ensureRequiredResources() which runs on every reconciliation
+func (r *AutoIndexerReconciler) handlePendingPhase(ctx context.Context, autoIndexerObj *autoindexerv1alpha1.AutoIndexer) error {
+	r.Log.Info("Handling Pending phase", "AutoIndexer", autoIndexerObj.Name)
+
+	// Determine next phase based on configuration
+	if autoIndexerObj.Spec.Schedule != nil {
+		// Scheduled AutoIndexer - move to appropriate phase based on suspend state
+		if autoIndexerObj.Spec.Suspend != nil && *autoIndexerObj.Spec.Suspend {
+			r.updateStatus(ctx, autoIndexerObj, autoindexerv1alpha1.AutoIndexerPhaseSuspended, "Suspended", "AutoIndexer is suspended", nil)
+		} else {
+			r.updateStatus(ctx, autoIndexerObj, autoindexerv1alpha1.AutoIndexerPhaseScheduled, "Scheduled", "AutoIndexer is scheduled and ready", nil)
 		}
 	} else {
-		// Handle one-time execution (Job)
+		// One-time execution - create job and move to Running phase
 		if err := r.ensureJob(ctx, autoIndexerObj); err != nil {
-			if updateErr := r.updateStatusConditionIfNotMatch(ctx, autoIndexerObj, autoindexerv1alpha1.ConditionTypeResourceStatus, metav1.ConditionTrue,
-				"autoIndexerEnsureJobFailed", err.Error()); updateErr != nil {
-				klog.ErrorS(updateErr, "failed to update autoindexer status", "autoindexer", klog.KObj(autoIndexerObj))
-				return ctrl.Result{}, updateErr
+			r.Log.Error(err, "failed to create job for one-time execution", "AutoIndexer", autoIndexerObj.Name)
+			r.updateStatus(ctx, autoIndexerObj, autoindexerv1alpha1.AutoIndexerPhaseFailed, "JobCreationFailed", err.Error(), []metav1.Condition{
+				{
+					Type:               string(autoindexerv1alpha1.AutoIndexerConditionTypeError),
+					Status:             metav1.ConditionTrue,
+					Reason:             "JobCreationFailed",
+					Message:            "Failed to ensure indexing job",
+					LastTransitionTime: metav1.Now(),
+					ObservedGeneration: autoIndexerObj.Generation,
+				},
+				{
+					Type:               string(autoindexerv1alpha1.ConditionTypeResourceStatus),
+					Status:             metav1.ConditionFalse,
+					Reason:             "JobCreationFailed",
+					Message:            "Failed to ensure indexing job",
+					LastTransitionTime: metav1.Now(),
+					ObservedGeneration: autoIndexerObj.Generation,
+				},
+			})
+			return err
+		}
+		// Move to Running phase as job is starting
+		r.updateStatus(ctx, autoIndexerObj, autoindexerv1alpha1.AutoIndexerPhaseRunning, "JobStarted", "Indexing job has been started", nil)
+	}
+
+	return nil
+}
+
+// handleScheduledPhase handles the Scheduled phase - monitors for new jobs and validates state
+func (r *AutoIndexerReconciler) handleScheduledPhase(ctx context.Context, autoIndexerObj *autoindexerv1alpha1.AutoIndexer) error {
+	r.Log.Info("Handling Scheduled phase", "AutoIndexer", autoIndexerObj.Name)
+
+	// Check if suspend state has changed
+	if autoIndexerObj.Spec.Suspend != nil && *autoIndexerObj.Spec.Suspend {
+		r.updateStatus(ctx, autoIndexerObj, autoindexerv1alpha1.AutoIndexerPhaseSuspended, "Suspended", "AutoIndexer has been suspended", nil)
+		return nil
+	}
+
+	// Check for running jobs (validation should have caught this, but double-check)
+	runningJobs, _, _, _, err := r.getJobStatus(ctx, autoIndexerObj)
+	if err != nil {
+		r.Log.Error(err, "failed to get job status", "AutoIndexer", autoIndexerObj.Name)
+		return err
+	}
+
+	if runningJobs > 0 {
+		r.updateStatus(ctx, autoIndexerObj, autoindexerv1alpha1.AutoIndexerPhaseRunning, "JobsRunning", fmt.Sprintf("%d jobs are now running", runningJobs), nil)
+		return nil
+	}
+
+	if autoIndexerObj.Annotations[utils.AutoIndexerDriftDetectedAnnotation] == "true" {
+		r.updateStatus(ctx, autoIndexerObj, autoindexerv1alpha1.AutoIndexerPhaseDriftRemediation, "DriftDetected", "Drift detected, entering remediation phase", nil)
+	}
+
+	return nil
+}
+
+// handleSuspendedPhase handles the Suspended phase - waits for unsuspend
+func (r *AutoIndexerReconciler) handleSuspendedPhase(ctx context.Context, autoIndexerObj *autoindexerv1alpha1.AutoIndexer) error {
+	r.Log.Info("Handling Suspended phase", "AutoIndexer", autoIndexerObj.Name)
+
+	// Check if suspend state has changed
+	if autoIndexerObj.Spec.Suspend == nil || !*autoIndexerObj.Spec.Suspend {
+		r.updateStatus(ctx, autoIndexerObj, autoindexerv1alpha1.AutoIndexerPhaseScheduled, "Unsuspended", "AutoIndexer has been unsuspended", nil)
+	}
+
+	// Remain suspended, check again later
+	return nil
+}
+
+// handleRunningPhase handles the Running phase - monitors job completion
+func (r *AutoIndexerReconciler) handleRunningPhase(ctx context.Context, autoIndexerObj *autoindexerv1alpha1.AutoIndexer) error {
+	r.Log.Info("Handling Running phase", "AutoIndexer", autoIndexerObj.Name)
+
+	runningJobs, failedJobs, completedJobs, latestJobFailed, err := r.getJobStatus(ctx, autoIndexerObj)
+	if err != nil {
+		r.Log.Error(err, "failed to get job status", "AutoIndexer", autoIndexerObj.Name)
+		return err
+	}
+
+	// If no jobs are running, determine next phase
+	if runningJobs == 0 {
+		if failedJobs > 0 && latestJobFailed && autoIndexerObj.Spec.Schedule == nil {
+			// Non-scheduled AutoIndexer with failed jobs
+			r.updateStatus(ctx, autoIndexerObj, autoindexerv1alpha1.AutoIndexerPhaseFailed, "JobsFailed", fmt.Sprintf("%d jobs have failed", failedJobs), nil)
+		} else if completedJobs > 0 {
+			if autoIndexerObj.Spec.Schedule != nil {
+				// Scheduled AutoIndexer - go back to scheduled phase
+				r.updateStatus(ctx, autoIndexerObj, autoindexerv1alpha1.AutoIndexerPhaseScheduled, "JobsCompleted", "Jobs completed, waiting for next schedule", nil)
+			} else {
+				// Non-scheduled AutoIndexer - mark as completed
+				r.updateStatus(ctx, autoIndexerObj, autoindexerv1alpha1.AutoIndexerPhaseCompleted, "JobsCompleted", "All jobs completed successfully", nil)
 			}
-			return ctrl.Result{}, err
 		}
 	}
 
-	if err := r.updateStatusConditionIfNotMatch(ctx, autoIndexerObj, autoindexerv1alpha1.ConditionTypeResourceStatus, metav1.ConditionTrue,
-		"autoIndexerResourceStatusSuccess", "autoindexer resources are ready"); err != nil {
-		klog.ErrorS(err, "failed to update autoindexer status", "autoindexer", klog.KObj(autoIndexerObj))
-		// Don't return error here as the main reconciliation succeeded
+	return nil
+}
+
+// handleCompletedPhase handles the Completed phase - waits for reset to Pending
+func (r *AutoIndexerReconciler) handleCompletedPhase(ctx context.Context, autoIndexerObj *autoindexerv1alpha1.AutoIndexer) error {
+	r.Log.Info("Handling Completed phase", "AutoIndexer", autoIndexerObj.Name)
+
+	return nil
+}
+
+// handleFailedPhase handles the Failed phase - waits for intervention or reset
+func (r *AutoIndexerReconciler) handleFailedPhase(ctx context.Context, autoIndexerObj *autoindexerv1alpha1.AutoIndexer) error {
+	r.Log.Info("Handling Failed phase", "AutoIndexer", autoIndexerObj.Name)
+
+	return nil
+}
+
+// handleDriftRemediationPhase handles the DriftRemediation phase - orchestrates drift remediation
+func (r *AutoIndexerReconciler) handleDriftRemediationPhase(ctx context.Context, autoIndexerObj *autoindexerv1alpha1.AutoIndexer) error {
+	r.Log.Info("Handling DriftRemediation phase", "AutoIndexer", autoIndexerObj.Name)
+	driftDetected := autoIndexerObj.Annotations[utils.AutoIndexerDriftDetectedAnnotation]
+
+	if driftDetected != "true" {
+		if autoIndexerObj.Spec.Suspend != nil && *autoIndexerObj.Spec.Suspend {
+			if err := r.setSuspendedState(ctx, autoIndexerObj, false); err != nil {
+				r.Log.Error(err, "failed to unsuspend AutoIndexer after drift remediation", "AutoIndexer", autoIndexerObj.Name)
+				return err
+			}
+			r.Log.Info("AutoIndexer unsuspended after drift remediation", "AutoIndexer", autoIndexerObj.Name)
+			return nil
+		}
+		r.Log.Info("No drift detected annotation found, exiting DriftRemediation phase", "AutoIndexer", autoIndexerObj.Name)
+		r.updateStatus(ctx, autoIndexerObj, autoindexerv1alpha1.AutoIndexerPhasePending, "NoDriftDetected", "No drift detected, resetting to Pending", nil)
+		return nil
 	}
 
-	return ctrl.Result{}, nil
+	if autoIndexerObj.Spec.Suspend == nil || (autoIndexerObj.Spec.Suspend != nil && !*autoIndexerObj.Spec.Suspend) {
+		if err := r.setSuspendedState(ctx, autoIndexerObj, true); err != nil {
+			r.Log.Error(err, "failed to suspend AutoIndexer during drift remediation", "AutoIndexer", autoIndexerObj.Name)
+			return err
+		}
+		r.Log.Info("AutoIndexer suspended during drift remediation", "AutoIndexer", autoIndexerObj.Name)
+		return nil
+	}
+
+	lastRemediationTime := autoIndexerObj.Annotations[utils.AutoIndexerLastDriftRemediatedAnnotation]
+	lastDetectionTime := autoIndexerObj.Annotations[utils.AutoIndexerLastDriftDetectedAnnotation]
+	if lastDetectionTime != "" && lastRemediationTime != "" {
+		if tDetect, err := time.Parse(time.RFC3339, lastDetectionTime); err == nil {
+			if tRemediate, err := time.Parse(time.RFC3339, lastRemediationTime); err == nil {
+				if tRemediate.After(tDetect) {
+					// drift already remediated
+					r.Log.Info("Drift was already remediated since last detection, waiting for detector to update annotations", "AutoIndexer", autoIndexerObj.Name)
+					return nil
+				}
+			}
+		}
+	}
+
+	runningJobs, _, _, _, err := r.getJobStatus(ctx, autoIndexerObj)
+	if err != nil {
+		r.Log.Error(err, "failed to get job status", "AutoIndexer", autoIndexerObj.Name)
+		return err
+	}
+	if runningJobs > 0 {
+		r.Log.Info("indexing job is still running", "AutoIndexer", autoIndexerObj.Name)
+		return nil
+	}
+
+	indexes, err := r.RAGClient.ListIndexes(autoIndexerObj.Spec.RAGEngine, autoIndexerObj.Spec.IndexName, autoIndexerObj.Name, autoIndexerObj.Namespace)
+	if err != nil {
+		r.Log.Error(err, "failed to list indexes", "AutoIndexer", autoIndexerObj.Name)
+		return err
+	}
+
+	indexFound := false
+	for _, index := range indexes {
+		if strings.EqualFold(index, autoIndexerObj.Spec.IndexName) {
+			indexFound = true
+			break
+		}
+	}
+
+	if indexFound {
+		err = r.RAGClient.DeleteIndex(autoIndexerObj.Spec.RAGEngine, autoIndexerObj.Spec.IndexName, autoIndexerObj.Namespace)
+		if err != nil {
+			r.Log.Error(err, "failed to delete index during drift remediation", "AutoIndexer", autoIndexerObj.Name)
+			return err
+		}
+		r.Log.Info("Deleted drifted index", "AutoIndexer", autoIndexerObj.Name)
+	}
+
+	if autoIndexerObj.Spec.DataSource.Type == autoindexerv1alpha1.DataSourceTypeGit {
+		emptyCommit := ""
+		autoIndexerObj.Status.LastIndexedCommit = &emptyCommit
+		autoIndexerObj.Status.NumOfDocumentInIndex = 0
+		r.Log.Info("Reset LastIndexedCommit due to drift remediation", "AutoIndexer", autoIndexerObj.Name)
+	}
+
+	// Update annotation to mark drift as cleared
+	// Next reconciliations will detect no drift and move back to Pending phase
+	existingAutoIndexerObj := autoIndexerObj.DeepCopy()
+	autoIndexerObj.Annotations[utils.AutoIndexerLastDriftRemediatedAnnotation] = time.Now().Format(time.RFC3339)
+	return r.updateAnnotations(ctx, autoIndexerObj, existingAutoIndexerObj)
 }
 
 // validateRAGEngineRef validates that the referenced RAGEngine exists
@@ -179,6 +474,43 @@ func (r *AutoIndexerReconciler) validateRAGEngineRef(ctx context.Context, autoIn
 		}
 		return fmt.Errorf("failed to get referenced RAGEngine: %w", err)
 	}
+
+	return nil
+}
+
+// ensureRequiredResources ensures all required resources exist and are up to date
+// This runs on every reconciliation to handle user modifications and deleted resources
+func (r *AutoIndexerReconciler) ensureRequiredResources(ctx context.Context, autoIndexerObj *autoindexerv1alpha1.AutoIndexer) error {
+	// Validate that referenced RAGEngine exists
+	if err := r.validateRAGEngineRef(ctx, autoIndexerObj); err != nil {
+		r.Log.Error(err, "RAGEngine validation failed", "AutoIndexer", autoIndexerObj.Name)
+		r.setAutoIndexerCondition(autoIndexerObj, autoindexerv1alpha1.AutoIndexerConditionTypeError, metav1.ConditionTrue, "RAGEngineNotFound", err.Error())
+		r.setAutoIndexerCondition(autoIndexerObj, autoindexerv1alpha1.ConditionTypeResourceStatus, metav1.ConditionFalse, "RAGEngineNotFound", "Referenced RAGEngine not found")
+		return err
+	}
+
+	// Always ensure RBAC resources exist and are up to date
+	if err := r.ensureRBACResources(ctx, autoIndexerObj); err != nil {
+		r.Log.Error(err, "RBAC resources failed", "AutoIndexer", autoIndexerObj.Name)
+		r.setAutoIndexerCondition(autoIndexerObj, autoindexerv1alpha1.AutoIndexerConditionTypeError, metav1.ConditionTrue, "RBACFailed", err.Error())
+		r.setAutoIndexerCondition(autoIndexerObj, autoindexerv1alpha1.ConditionTypeResourceStatus, metav1.ConditionFalse, "RBACFailed", "Failed to ensure RBAC resources")
+		return err
+	}
+
+	// Ensure Job/CronJob resources based on schedule configuration
+	if autoIndexerObj.Spec.Schedule != nil {
+		// Ensure CronJob exists and is up to date
+		if err := r.ensureCronJob(ctx, autoIndexerObj); err != nil {
+			r.Log.Error(err, "CronJob resources failed", "AutoIndexer", autoIndexerObj.Name)
+			r.setAutoIndexerCondition(autoIndexerObj, autoindexerv1alpha1.AutoIndexerConditionTypeError, metav1.ConditionTrue, "CronJobFailed", err.Error())
+			r.setAutoIndexerCondition(autoIndexerObj, autoindexerv1alpha1.ConditionTypeResourceStatus, metav1.ConditionFalse, "CronJobFailed", "Failed to ensure CronJob resources")
+			return err
+		}
+	}
+
+	// Clear any previous resource-related error conditions
+	r.setAutoIndexerCondition(autoIndexerObj, autoindexerv1alpha1.AutoIndexerConditionTypeError, metav1.ConditionFalse, "ResourcesEnsured", "")
+	r.setAutoIndexerCondition(autoIndexerObj, autoindexerv1alpha1.ConditionTypeResourceStatus, metav1.ConditionTrue, "ResourcesEnsured", "All required resources are ensured")
 
 	return nil
 }
@@ -213,7 +545,7 @@ func (r *AutoIndexerReconciler) ensureServiceAccount(ctx context.Context, autoIn
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			// Create the ServiceAccount
-			klog.InfoS("Creating ServiceAccount", "serviceaccount", klog.KObj(serviceAccount), "autoindexer", klog.KObj(autoIndexerObj))
+			r.Log.Info("Creating ServiceAccount", "serviceaccount", serviceAccount.Name, "namespace", serviceAccount.Namespace, "autoindexer", autoIndexerObj.Name)
 			return r.Create(ctx, serviceAccount)
 		}
 		return err
@@ -221,7 +553,7 @@ func (r *AutoIndexerReconciler) ensureServiceAccount(ctx context.Context, autoIn
 
 	// Update the existing ServiceAccount if needed
 	if !hasOwnerReference(existingSA, autoIndexerObj) {
-		klog.InfoS("Updating ServiceAccount", "serviceaccount", klog.KObj(serviceAccount), "autoindexer", klog.KObj(autoIndexerObj))
+		r.Log.Info("Updating ServiceAccount", "serviceaccount", serviceAccount.Name, "namespace", serviceAccount.Namespace, "autoindexer", autoIndexerObj.Name)
 		existingSA.OwnerReferences = serviceAccount.OwnerReferences
 		existingSA.Labels = serviceAccount.Labels
 		return r.Update(ctx, existingSA)
@@ -240,7 +572,7 @@ func (r *AutoIndexerReconciler) ensureRole(ctx context.Context, autoIndexerObj *
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			// Create the Role
-			klog.InfoS("Creating Role", "role", klog.KObj(role), "autoindexer", klog.KObj(autoIndexerObj))
+			r.Log.Info("Creating Role", "role", role.Name, "namespace", role.Namespace, "autoindexer", autoIndexerObj.Name)
 			return r.Create(ctx, role)
 		}
 		return err
@@ -248,7 +580,7 @@ func (r *AutoIndexerReconciler) ensureRole(ctx context.Context, autoIndexerObj *
 
 	// Update the existing Role if needed
 	if !reflect.DeepEqual(existingRole.Rules, role.Rules) || !hasOwnerReference(existingRole, autoIndexerObj) {
-		klog.InfoS("Updating Role", "role", klog.KObj(role), "autoindexer", klog.KObj(autoIndexerObj))
+		r.Log.Info("Updating Role", "role", role.Name, "namespace", role.Namespace, "autoindexer", autoIndexerObj.Name)
 		existingRole.Rules = role.Rules
 		existingRole.OwnerReferences = role.OwnerReferences
 		existingRole.Labels = role.Labels
@@ -268,7 +600,7 @@ func (r *AutoIndexerReconciler) ensureRoleBinding(ctx context.Context, autoIndex
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			// Create the RoleBinding
-			klog.InfoS("Creating RoleBinding", "rolebinding", klog.KObj(roleBinding), "autoindexer", klog.KObj(autoIndexerObj))
+			r.Log.Info("Creating RoleBinding", "rolebinding", roleBinding.Name, "namespace", roleBinding.Namespace, "autoindexer", autoIndexerObj.Name)
 			return r.Create(ctx, roleBinding)
 		}
 		return err
@@ -278,7 +610,7 @@ func (r *AutoIndexerReconciler) ensureRoleBinding(ctx context.Context, autoIndex
 	if !reflect.DeepEqual(existingRB.Subjects, roleBinding.Subjects) ||
 		!reflect.DeepEqual(existingRB.RoleRef, roleBinding.RoleRef) ||
 		!hasOwnerReference(existingRB, autoIndexerObj) {
-		klog.InfoS("Updating RoleBinding", "rolebinding", klog.KObj(roleBinding), "autoindexer", klog.KObj(autoIndexerObj))
+		r.Log.Info("Updating RoleBinding", "rolebinding", roleBinding.Name, "namespace", roleBinding.Namespace, "autoindexer", autoIndexerObj.Name)
 		existingRB.Subjects = roleBinding.Subjects
 		existingRB.RoleRef = roleBinding.RoleRef
 		existingRB.OwnerReferences = roleBinding.OwnerReferences
@@ -296,7 +628,7 @@ func (r *AutoIndexerReconciler) ensureCronJob(ctx context.Context, autoIndexerOb
 		AutoIndexer:        autoIndexerObj,
 		JobName:            fmt.Sprintf("%s-cronjob", autoIndexerObj.Name),
 		JobType:            "scheduled-indexing",
-		Image:              getImageConfig().GetImage(),
+		Image:              manifests.GetJobImageConfig().GetImage(),
 		ImagePullPolicy:    "Always",
 		ServiceAccountName: manifests.GenerateServiceAccountName(autoIndexerObj),
 	}
@@ -314,7 +646,7 @@ func (r *AutoIndexerReconciler) ensureCronJob(ctx context.Context, autoIndexerOb
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			// Create the CronJob
-			klog.InfoS("Creating CronJob", "cronjob", klog.KObj(cronJob), "autoindexer", klog.KObj(autoIndexerObj))
+			r.Log.Info("Creating CronJob", "cronjob", cronJob.Name, "namespace", cronJob.Namespace, "autoindexer", autoIndexerObj.Name)
 			return r.Create(ctx, cronJob)
 		}
 		return err
@@ -322,7 +654,7 @@ func (r *AutoIndexerReconciler) ensureCronJob(ctx context.Context, autoIndexerOb
 
 	// Update the existing CronJob if needed
 	if !equalCronJobs(existingCronJob, cronJob) {
-		klog.InfoS("Updating CronJob", "cronjob", klog.KObj(cronJob), "autoindexer", klog.KObj(autoIndexerObj))
+		r.Log.Info("Updating CronJob", "cronjob", cronJob.Name, "namespace", cronJob.Namespace, "autoindexer", autoIndexerObj.Name)
 		existingCronJob.Spec = cronJob.Spec
 		return r.Update(ctx, existingCronJob)
 	}
@@ -337,7 +669,7 @@ func (r *AutoIndexerReconciler) ensureJob(ctx context.Context, autoIndexerObj *a
 		AutoIndexer:        autoIndexerObj,
 		JobName:            fmt.Sprintf("%s-job", autoIndexerObj.Name),
 		JobType:            "one-time-indexing",
-		Image:              getImageConfig().GetImage(),
+		Image:              manifests.GetJobImageConfig().GetImage(),
 		ImagePullPolicy:    "Always",
 		ServiceAccountName: manifests.GenerateServiceAccountName(autoIndexerObj),
 	}
@@ -355,20 +687,20 @@ func (r *AutoIndexerReconciler) ensureJob(ctx context.Context, autoIndexerObj *a
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			// Create the Job
-			klog.InfoS("Creating Job", "job", klog.KObj(job), "autoindexer", klog.KObj(autoIndexerObj))
+			r.Log.Info("Creating Job", "job", job.Name, "namespace", job.Namespace, "autoindexer", autoIndexerObj.Name)
 			return r.Create(ctx, job)
 		}
 		return err
 	}
 
 	// Jobs are immutable once created, so we don't update existing ones
-	klog.InfoS("Job already exists", "job", klog.KObj(existingJob), "autoindexer", klog.KObj(autoIndexerObj))
+	r.Log.Info("Job already exists", "job", existingJob.Name, "namespace", existingJob.Namespace, "autoindexer", autoIndexerObj.Name)
 	return nil
 }
 
 // deleteAutoIndexer handles cleanup when AutoIndexer is being deleted
 func (r *AutoIndexerReconciler) deleteAutoIndexer(ctx context.Context, autoIndexerObj *autoindexerv1alpha1.AutoIndexer) (ctrl.Result, error) {
-	klog.InfoS("Deleting AutoIndexer", "autoindexer", klog.KObj(autoIndexerObj))
+	r.Log.Info("Deleting AutoIndexer", "autoindexer", autoIndexerObj.Name, "namespace", autoIndexerObj.Namespace)
 
 	// Clean up owned resources (Jobs, CronJobs, etc.)
 	// Wait for all owned Jobs to complete before removing the finalizer
@@ -376,63 +708,32 @@ func (r *AutoIndexerReconciler) deleteAutoIndexer(ctx context.Context, autoIndex
 	if err := r.Client.List(ctx, jobs, client.InNamespace(autoIndexerObj.Namespace), client.MatchingLabels{
 		AutoIndexerNameLabel: autoIndexerObj.Name,
 	}); err != nil {
-		klog.ErrorS(err, "failed to list jobs for deletion wait", "autoindexer", klog.KObj(autoIndexerObj))
+		r.Log.Error(err, "failed to list jobs for deletion wait", "autoindexer", autoIndexerObj.Name)
 		return ctrl.Result{}, err
 	}
 	for _, job := range jobs.Items {
 		// If job is not completed or failed, requeue
 		if job.Status.Succeeded == 0 && job.Status.Failed == 0 {
-			klog.InfoS("Waiting for Job to complete before deleting AutoIndexer", "job", job.Name, "autoindexer", klog.KObj(autoIndexerObj))
+			r.Log.Info("Waiting for Job to complete before deleting AutoIndexer", "job", job.Name, "autoindexer", autoIndexerObj.Name)
 			return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 		}
 	}
 
-	klog.InfoS("AutoIndexer deleted successfully", "autoindexer", klog.KObj(autoIndexerObj))
+	r.Log.Info("AutoIndexer deleted successfully", "autoindexer", autoIndexerObj.Name, "namespace", autoIndexerObj.Namespace)
 	return ctrl.Result{}, nil
-}
-
-// updateStatusConditionIfNotMatch updates the status condition if it doesn't match
-func (r *AutoIndexerReconciler) updateStatusConditionIfNotMatch(ctx context.Context, autoIndexerObj *autoindexerv1alpha1.AutoIndexer, conditionType autoindexerv1alpha1.ConditionType, status metav1.ConditionStatus, reason, message string) error {
-	// Find existing condition
-	var existingCondition *metav1.Condition
-	for i := range autoIndexerObj.Status.Conditions {
-		if autoIndexerObj.Status.Conditions[i].Type == string(conditionType) {
-			existingCondition = &autoIndexerObj.Status.Conditions[i]
-			break
-		}
-	}
-
-	// Check if update is needed
-	if existingCondition != nil && existingCondition.Status == status && existingCondition.Reason == reason && existingCondition.Message == message {
-		return nil // No update needed
-	}
-
-	// Update or add condition
-	newCondition := metav1.Condition{
-		Type:               string(conditionType),
-		Status:             status,
-		Reason:             reason,
-		Message:            message,
-		LastTransitionTime: metav1.Now(),
-	}
-
-	if existingCondition != nil {
-		*existingCondition = newCondition
-	} else {
-		autoIndexerObj.Status.Conditions = append(autoIndexerObj.Status.Conditions, newCondition)
-	}
-
-	// Update status
-	if err := r.Client.Status().Update(ctx, autoIndexerObj); err != nil {
-		return fmt.Errorf("failed to update autoindexer status: %w", err)
-	}
-
-	return nil
 }
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *AutoIndexerReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	r.Recorder = mgr.GetEventRecorderFor("AutoIndexer")
+
+	// Add a hook to start drift detection when the manager starts
+	if err := mgr.Add(&driftDetectorRunnable{
+		driftDetector: r.DriftDetector,
+		logger:        r.Log.WithName("drift-detector-runnable"),
+	}); err != nil {
+		return fmt.Errorf("failed to add drift detector runnable: %w", err)
+	}
 
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&autoindexerv1alpha1.AutoIndexer{}).
@@ -445,35 +746,20 @@ func (r *AutoIndexerReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Complete(r)
 }
 
+// driftDetectorRunnable implements manager.Runnable to start drift detection
+type driftDetectorRunnable struct {
+	driftDetector driftdetection.DriftDetector
+	logger        logr.Logger
+}
+
+func (d *driftDetectorRunnable) Start(ctx context.Context) error {
+	d.logger.Info("Starting drift detector")
+	return d.driftDetector.Start(ctx.Done())
+}
+
 // equalCronJobs compares two CronJob specs for equality
 func equalCronJobs(existing, desired *batchv1.CronJob) bool {
 	return reflect.DeepEqual(existing.Spec, desired.Spec)
-}
-
-type ImageConfig struct {
-	RegistryName string
-	ImageName    string
-	ImageTag     string
-}
-
-func (ic ImageConfig) GetImage() string {
-	return fmt.Sprintf("%s/%s:%s", ic.RegistryName, ic.ImageName, ic.ImageTag)
-}
-
-func getImageConfig() ImageConfig {
-	return ImageConfig{
-		RegistryName: getEnv("PRESET_AUTO_INDEXER_REGISTRY_NAME", "mcr.microsoft.com/aks/kaito"),
-		ImageName:    getEnv("PRESET_AUTO_INDEXER_IMAGE_NAME", "kaito-autoindexer"),
-		ImageTag:     getEnv("PRESET_AUTO_INDEXER_IMAGE_TAG", "0.6.0"),
-	}
-}
-
-func getEnv(key, defaultValue string) string {
-	value := os.Getenv(key)
-	if value == "" {
-		return defaultValue
-	}
-	return value
 }
 
 // hasOwnerReference checks if the resource has an owner reference to the given object
