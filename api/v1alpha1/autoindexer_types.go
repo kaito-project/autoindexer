@@ -68,6 +68,11 @@ type AutoIndexerSpec struct {
 	// This will also suspend any drift detection for data sources
 	// +optional
 	Suspend *bool `json:"suspend,omitempty"`
+
+	// DriftRemediationPolicy defines how to handle detected drift between expected and actual document counts
+	// +optional
+	// +kubebuilder:default={strategy: "Auto"}
+	DriftRemediationPolicy *DriftRemediationPolicy `json:"driftRemediationPolicy,omitempty"`
 }
 
 // DataSourceSpec defines the source of documents to be indexed
@@ -129,6 +134,23 @@ type StaticDataSourceSpec struct {
 	// +kubebuilder:validation:Required
 	URLs []string `json:"urls"`
 }
+
+// DriftRemediationPolicy defines comprehensive drift handling policies
+type DriftRemediationPolicy struct {
+	// Strategy defines the overall remediation approach
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:Enum=Auto;Manual;Ignore
+	Strategy DriftRemediationStrategy `json:"strategy"`
+}
+
+// +kubebuilder:validation:Enum=Auto;Manual;Ignore
+type DriftRemediationStrategy string
+
+const (
+	DriftRemediationStrategyAuto   DriftRemediationStrategy = "Auto"   // Always auto-remediate
+	DriftRemediationStrategyManual DriftRemediationStrategy = "Manual" // Always require manual intervention
+	DriftRemediationStrategyIgnore DriftRemediationStrategy = "Ignore" // Ignore drift
+)
 
 // CredentialsSpec defines authentication credentials
 type CredentialsSpec struct {
