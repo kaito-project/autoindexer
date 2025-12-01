@@ -303,7 +303,27 @@ func (r *AutoIndexerReconciler) handleScheduledPhase(ctx context.Context, autoIn
 		return nil
 	}
 
-	if autoIndexerObj.Annotations[utils.AutoIndexerDriftDetectedAnnotation] == "true" && autoIndexerObj.Status.NumOfDocumentInIndex > 0 {
+	if autoIndexerObj.Annotations[utils.AutoIndexerDriftDetectedAnnotation] == "true" {
+		lastClearTime := autoIndexerObj.Annotations[utils.AutoIndexerLastDriftClearedAnnotation]
+		lastDetectionTime := autoIndexerObj.Annotations[utils.AutoIndexerLastDriftDetectedAnnotation]
+
+		if lastDetectionTime != "" && lastClearTime != "" {
+			if tDetect, err := time.Parse(time.RFC3339, lastDetectionTime); err == nil {
+				if tClear, err := time.Parse(time.RFC3339, lastClearTime); err == nil {
+					if tClear.After(tDetect) {
+						// drift already cleared
+						r.Log.Info("Drift was already cleared after last detection, staying in Scheduled phase", "AutoIndexer", autoIndexerObj.Name)
+						return nil
+					}
+				}
+			}
+		}
+
+		if autoIndexerObj.Status.NumOfDocumentInIndex == 0 {
+			r.Log.Info("Index is empty, skipping drift remediation", "AutoIndexer", autoIndexerObj.Name)
+			return nil
+		}
+
 		r.updateStatus(ctx, autoIndexerObj, autoindexerv1alpha1.AutoIndexerPhaseDriftRemediation, "DriftDetected", "Drift detected, entering remediation phase", nil)
 	}
 
