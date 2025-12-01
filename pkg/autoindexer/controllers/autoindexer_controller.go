@@ -304,26 +304,6 @@ func (r *AutoIndexerReconciler) handleScheduledPhase(ctx context.Context, autoIn
 	}
 
 	if autoIndexerObj.Annotations[utils.AutoIndexerDriftDetectedAnnotation] == "true" {
-		lastClearTime := autoIndexerObj.Annotations[utils.AutoIndexerLastDriftClearedAnnotation]
-		lastDetectionTime := autoIndexerObj.Annotations[utils.AutoIndexerLastDriftDetectedAnnotation]
-
-		if lastDetectionTime != "" && lastClearTime != "" {
-			if tDetect, err := time.Parse(time.RFC3339, lastDetectionTime); err == nil {
-				if tClear, err := time.Parse(time.RFC3339, lastClearTime); err == nil {
-					if tClear.After(tDetect) {
-						// drift already cleared
-						r.Log.Info("Drift was already cleared after last detection, staying in Scheduled phase", "AutoIndexer", autoIndexerObj.Name)
-						return nil
-					}
-				}
-			}
-		}
-
-		if autoIndexerObj.Status.NumOfDocumentInIndex == 0 {
-			r.Log.Info("Index is empty, skipping drift remediation", "AutoIndexer", autoIndexerObj.Name)
-			return nil
-		}
-
 		r.updateStatus(ctx, autoIndexerObj, autoindexerv1alpha1.AutoIndexerPhaseDriftRemediation, "DriftDetected", "Drift detected, entering remediation phase", nil)
 	}
 
@@ -390,22 +370,38 @@ func (r *AutoIndexerReconciler) handleFailedPhase(ctx context.Context, autoIndex
 func (r *AutoIndexerReconciler) handleDriftRemediationPhase(ctx context.Context, autoIndexerObj *autoindexerv1alpha1.AutoIndexer) error {
 	r.Log.Info("Handling DriftRemediation phase", "AutoIndexer", autoIndexerObj.Name)
 	driftDetected := autoIndexerObj.Annotations[utils.AutoIndexerDriftDetectedAnnotation]
-	lastClearTime := autoIndexerObj.Annotations[utils.AutoIndexerLastDriftClearedAnnotation]
-	lastDetectionTime := autoIndexerObj.Annotations[utils.AutoIndexerLastDriftDetectedAnnotation]
 
 	if driftDetected != "true" {
+		if autoIndexerObj.Spec.Suspend != nil && *autoIndexerObj.Spec.Suspend {
+			if err := r.setSuspendedState(ctx, autoIndexerObj, false); err != nil {
+				r.Log.Error(err, "failed to unsuspend AutoIndexer after drift remediation", "AutoIndexer", autoIndexerObj.Name)
+				return err
+			}
+			r.Log.Info("AutoIndexer unsuspended after drift remediation", "AutoIndexer", autoIndexerObj.Name)
+			return nil
+		}
 		r.Log.Info("No drift detected annotation found, exiting DriftRemediation phase", "AutoIndexer", autoIndexerObj.Name)
 		r.updateStatus(ctx, autoIndexerObj, autoindexerv1alpha1.AutoIndexerPhasePending, "NoDriftDetected", "No drift detected, resetting to Pending", nil)
 		return nil
 	}
 
-	if lastDetectionTime != "" && lastClearTime != "" {
+	if autoIndexerObj.Spec.Suspend == nil || (autoIndexerObj.Spec.Suspend != nil && !*autoIndexerObj.Spec.Suspend) {
+		if err := r.setSuspendedState(ctx, autoIndexerObj, true); err != nil {
+			r.Log.Error(err, "failed to suspend AutoIndexer during drift remediation", "AutoIndexer", autoIndexerObj.Name)
+			return err
+		}
+		r.Log.Info("AutoIndexer suspended during drift remediation", "AutoIndexer", autoIndexerObj.Name)
+		return nil
+	}
+
+	lastRemediationTime := autoIndexerObj.Annotations[utils.AutoIndexerLastDriftRemediatedAnnotation]
+	lastDetectionTime := autoIndexerObj.Annotations[utils.AutoIndexerLastDriftDetectedAnnotation]
+	if lastDetectionTime != "" && lastRemediationTime != "" {
 		if tDetect, err := time.Parse(time.RFC3339, lastDetectionTime); err == nil {
-			if tClear, err := time.Parse(time.RFC3339, lastClearTime); err == nil {
-				if tClear.After(tDetect) {
-					// drift already cleared
-					r.Log.Info("Drift was already cleared after last detection, exiting DriftRemediation phase", "AutoIndexer", autoIndexerObj.Name)
-					r.updateStatus(ctx, autoIndexerObj, autoindexerv1alpha1.AutoIndexerPhasePending, "NoDriftDetected", "No drift detected, resetting to Pending", nil)
+			if tRemediate, err := time.Parse(time.RFC3339, lastRemediationTime); err == nil {
+				if tRemediate.After(tDetect) {
+					// drift already remediated
+					r.Log.Info("Drift was already remediated since last detection, waiting for detector to update annotations", "AutoIndexer", autoIndexerObj.Name)
 					return nil
 				}
 			}
@@ -455,7 +451,7 @@ func (r *AutoIndexerReconciler) handleDriftRemediationPhase(ctx context.Context,
 	// Update annotation to mark drift as cleared
 	// Next reconciliations will detect no drift and move back to Pending phase
 	existingAutoIndexerObj := autoIndexerObj.DeepCopy()
-	autoIndexerObj.Annotations[utils.AutoIndexerLastDriftClearedAnnotation] = time.Now().Format(time.RFC3339)
+	autoIndexerObj.Annotations[utils.AutoIndexerLastDriftRemediatedAnnotation] = time.Now().Format(time.RFC3339)
 	return r.updateAnnotations(ctx, autoIndexerObj, existingAutoIndexerObj)
 }
 

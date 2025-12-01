@@ -5,6 +5,6 @@ const (
 	AutoIndexerDriftDetectedAnnotation = "autoindexer.kaito.sh/drift-detected"
 	// AutoIndexerLastDriftDetectedAnnotation is the annotation key to record the last drift detection time
 	AutoIndexerLastDriftDetectedAnnotation = "autoindexer.kaito.sh/last-drift-detected"
-	// AutoIndexerLastDriftClearedAnnotation is the annotation key to record the last drift cleared time
-	AutoIndexerLastDriftClearedAnnotation = "autoindexer.kaito.sh/last-drift-cleared"
+	// AutoIndexerLastDriftRemediatedAnnotation is the annotation key to record the last drift remediated time
+	AutoIndexerLastDriftRemediatedAnnotation = "autoindexer.kaito.sh/last-drift-remediated"
 )

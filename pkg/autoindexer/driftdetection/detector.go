@@ -139,7 +139,7 @@ func (d *DriftDetectorImpl) performDriftCheck() {
 					"namespace", result.AutoIndexerNamespace)
 			}
 		} else {
-			if err := d.clearDriftDetected(ctx, &autoIndexer); err != nil {
+			if err := d.setDriftRemediated(ctx, &autoIndexer); err != nil {
 				d.logger.Error(err, "Failed to clear drift detected annotation for AutoIndexer",
 					"autoindexer", result.AutoIndexerName,
 					"namespace", result.AutoIndexerNamespace)
@@ -247,7 +247,7 @@ func (d *DriftDetectorImpl) setDriftDetected(ctx context.Context, autoIndexer *a
 	return nil
 }
 
-func (d *DriftDetectorImpl) clearDriftDetected(ctx context.Context, autoIndexer *autoindexerv1alpha1.AutoIndexer) error {
+func (d *DriftDetectorImpl) setDriftRemediated(ctx context.Context, autoIndexer *autoindexerv1alpha1.AutoIndexer) error {
 	if autoIndexer.Annotations == nil {
 		return nil
 	}
@@ -258,21 +258,6 @@ func (d *DriftDetectorImpl) clearDriftDetected(ctx context.Context, autoIndexer 
 	}
 
 	autoIndexer.Annotations[utils.AutoIndexerDriftDetectedAnnotation] = "false"
-	lastClearTime := autoIndexer.Annotations[utils.AutoIndexerLastDriftClearedAnnotation]
-	lastDetectionTime := autoIndexer.Annotations[utils.AutoIndexerLastDriftDetectedAnnotation]
-
-	newClearTime := time.Now().Format(time.RFC3339)
-	if lastDetectionTime != "" && lastClearTime != "" {
-		if tDetect, err := time.Parse(time.RFC3339, lastDetectionTime); err == nil {
-			if tClear, err := time.Parse(time.RFC3339, lastClearTime); err == nil {
-				if tClear.After(tDetect) {
-					// Drift was cleared after last detection, keep the old clear time
-					newClearTime = lastClearTime
-				}
-			}
-		}
-	}
-	autoIndexer.Annotations[utils.AutoIndexerLastDriftClearedAnnotation] = newClearTime
 
 	err := d.client.Update(ctx, autoIndexer)
 	if err != nil {

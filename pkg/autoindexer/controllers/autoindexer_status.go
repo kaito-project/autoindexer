@@ -60,6 +60,19 @@ func (r *AutoIndexerReconciler) updateAnnotations(ctx context.Context, autoIndex
 	return nil
 }
 
+func (r *AutoIndexerReconciler) setSuspendedState(ctx context.Context, autoIndexerObj *autoindexerv1alpha1.AutoIndexer, suspend bool) error {
+	existingAutoIndexerObj := autoIndexerObj.DeepCopy()
+	autoIndexerObj.Spec.Suspend = &suspend
+
+	if !equality.Semantic.DeepEqual(existingAutoIndexerObj.Spec, autoIndexerObj.Spec) {
+		// Spec changed, patch the whole object
+		if patchErr := r.Patch(ctx, autoIndexerObj, client.MergeFrom(existingAutoIndexerObj)); patchErr != nil {
+			return patchErr
+		}
+	}
+	return nil
+}
+
 func (r *AutoIndexerReconciler) patchAndReturn(ctx context.Context, obj, original *autoindexerv1alpha1.AutoIndexer, result ctrl.Result, err error) (ctrl.Result, error) {
 	if !equality.Semantic.DeepEqual(original.Status, obj.Status) {
 		// Only status changed, patch the status subresource
