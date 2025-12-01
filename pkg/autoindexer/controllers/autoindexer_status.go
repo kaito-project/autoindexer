@@ -50,13 +50,10 @@ func (r *AutoIndexerReconciler) setAutoIndexerCondition(autoIndexerObj *autoinde
 	autoIndexerObj.Status.Conditions = append(autoIndexerObj.Status.Conditions, condition)
 }
 
-func (r *AutoIndexerReconciler) clearDriftAnnotations(ctx context.Context, autoIndexerObj *autoindexerv1alpha1.AutoIndexer) error {
-	existingAutoIndexer := autoIndexerObj.DeepCopy()
-	delete(autoIndexerObj.Annotations, "autoindexer.kaito.sh/drift-detected")
-
-	if !equality.Semantic.DeepEqual(existingAutoIndexer.Spec, autoIndexerObj.Spec) || !equality.Semantic.DeepEqual(existingAutoIndexer.Annotations, autoIndexerObj.Annotations) {
+func (r *AutoIndexerReconciler) updateAnnotations(ctx context.Context, autoIndexerObj, existingAutoIndexerObj *autoindexerv1alpha1.AutoIndexer) error {
+	if !equality.Semantic.DeepEqual(existingAutoIndexerObj.Annotations, autoIndexerObj.Annotations) {
 		// Spec changed, patch the whole object
-		if patchErr := r.Patch(ctx, autoIndexerObj, client.MergeFrom(existingAutoIndexer)); patchErr != nil {
+		if patchErr := r.Patch(ctx, autoIndexerObj, client.MergeFrom(existingAutoIndexerObj)); patchErr != nil {
 			return patchErr
 		}
 	}

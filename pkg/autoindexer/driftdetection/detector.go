@@ -22,6 +22,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	autoindexerv1alpha1 "github.com/kaito-project/autoindexer/api/v1alpha1"
+	"github.com/kaito-project/autoindexer/pkg/autoindexer/utils"
 )
 
 // NewDriftDetector creates a new drift detector
@@ -137,6 +138,12 @@ func (d *DriftDetectorImpl) performDriftCheck() {
 					"autoindexer", result.AutoIndexerName,
 					"namespace", result.AutoIndexerNamespace)
 			}
+		} else {
+			if err := d.clearDriftDetected(ctx, &autoIndexer); err != nil {
+				d.logger.Error(err, "Failed to clear drift detected annotation for AutoIndexer",
+					"autoindexer", result.AutoIndexerName,
+					"namespace", result.AutoIndexerNamespace)
+			}
 		}
 	}
 }
@@ -229,10 +236,47 @@ func (d *DriftDetectorImpl) setDriftDetected(ctx context.Context, autoIndexer *a
 	if autoIndexer.Annotations == nil {
 		autoIndexer.Annotations = make(map[string]string)
 	}
-	autoIndexer.Annotations["autoindexer.kaito.sh/drift-detected"] = "true"
+
+	autoIndexer.Annotations[utils.AutoIndexerDriftDetectedAnnotation] = "true"
+	autoIndexer.Annotations[utils.AutoIndexerLastDriftDetectedAnnotation] = time.Now().Format(time.RFC3339)
+
 	err := d.client.Update(ctx, autoIndexer)
 	if err != nil {
-		return fmt.Errorf("failed to set annotation for AutoIndexer: %w", err)
+		return fmt.Errorf("failed to set drift-detected annotation to true for AutoIndexer: %w", err)
+	}
+	return nil
+}
+
+func (d *DriftDetectorImpl) clearDriftDetected(ctx context.Context, autoIndexer *autoindexerv1alpha1.AutoIndexer) error {
+	if autoIndexer.Annotations == nil {
+		return nil
+	}
+
+	driftDetected := autoIndexer.Annotations[utils.AutoIndexerDriftDetectedAnnotation]
+	if driftDetected == "" || driftDetected == "false" {
+		return nil
+	}
+
+	autoIndexer.Annotations[utils.AutoIndexerDriftDetectedAnnotation] = "false"
+	lastClearTime := autoIndexer.Annotations[utils.AutoIndexerLastDriftClearedAnnotation]
+	lastDetectionTime := autoIndexer.Annotations[utils.AutoIndexerLastDriftDetectedAnnotation]
+
+	newClearTime := time.Now().Format(time.RFC3339)
+	if lastDetectionTime != "" && lastClearTime != "" {
+		if tDetect, err := time.Parse(time.RFC3339, lastDetectionTime); err == nil {
+			if tClear, err := time.Parse(time.RFC3339, lastClearTime); err == nil {
+				if tClear.After(tDetect) {
+					// Drift was cleared after last detection, keep the old clear time
+					newClearTime = lastClearTime
+				}
+			}
+		}
+	}
+	autoIndexer.Annotations[utils.AutoIndexerLastDriftClearedAnnotation] = newClearTime
+
+	err := d.client.Update(ctx, autoIndexer)
+	if err != nil {
+		return fmt.Errorf("failed to set drift-detected annotation to false: %w", err)
 	}
 	return nil
 }

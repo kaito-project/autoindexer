@@ -38,6 +38,7 @@ import (
 	autoindexerv1alpha1 "github.com/kaito-project/autoindexer/api/v1alpha1"
 	"github.com/kaito-project/autoindexer/pkg/autoindexer/driftdetection"
 	"github.com/kaito-project/autoindexer/pkg/autoindexer/manifests"
+	"github.com/kaito-project/autoindexer/pkg/autoindexer/utils"
 	"github.com/kaito-project/autoindexer/pkg/clients/ragengine"
 	kaitov1alpha1 "github.com/kaito-project/kaito/api/v1alpha1"
 )
@@ -122,11 +123,11 @@ func (r *AutoIndexerReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	}
 
 	r.Log.Info("AutoIndexer is being created or updated", "AutoIndexer", req.NamespacedName)
-	return r.addAutoIndexer(ctx, autoIndexerObj)
+	return r.syncAutoIndexer(ctx, autoIndexerObj)
 }
 
 // addAutoIndexer handles the reconciliation logic for creating/updating AutoIndexer
-func (r *AutoIndexerReconciler) addAutoIndexer(ctx context.Context, autoIndexerObj *autoindexerv1alpha1.AutoIndexer) (ctrl.Result, error) {
+func (r *AutoIndexerReconciler) syncAutoIndexer(ctx context.Context, autoIndexerObj *autoindexerv1alpha1.AutoIndexer) (ctrl.Result, error) {
 	existingAutoIndexerObj := autoIndexerObj.DeepCopy()
 
 	// Always ensure required resources exist and are up to date
@@ -287,6 +288,7 @@ func (r *AutoIndexerReconciler) handleScheduledPhase(ctx context.Context, autoIn
 	// Check if suspend state has changed
 	if autoIndexerObj.Spec.Suspend != nil && *autoIndexerObj.Spec.Suspend {
 		r.updateStatus(ctx, autoIndexerObj, autoindexerv1alpha1.AutoIndexerPhaseSuspended, "Suspended", "AutoIndexer has been suspended", nil)
+		return nil
 	}
 
 	// Check for running jobs (validation should have caught this, but double-check)
@@ -301,8 +303,7 @@ func (r *AutoIndexerReconciler) handleScheduledPhase(ctx context.Context, autoIn
 		return nil
 	}
 
-	if autoIndexerObj.Annotations["autoindexer.kaito.sh/drift-detected"] == "true" {
-		delete(autoIndexerObj.Annotations, "autoindexer.kaito.sh/drift-detected")
+	if autoIndexerObj.Annotations[utils.AutoIndexerDriftDetectedAnnotation] == "true" && autoIndexerObj.Status.NumOfDocumentInIndex > 0 {
 		r.updateStatus(ctx, autoIndexerObj, autoindexerv1alpha1.AutoIndexerPhaseDriftRemediation, "DriftDetected", "Drift detected, entering remediation phase", nil)
 	}
 
@@ -368,15 +369,27 @@ func (r *AutoIndexerReconciler) handleFailedPhase(ctx context.Context, autoIndex
 // handleDriftRemediationPhase handles the DriftRemediation phase - orchestrates drift remediation
 func (r *AutoIndexerReconciler) handleDriftRemediationPhase(ctx context.Context, autoIndexerObj *autoindexerv1alpha1.AutoIndexer) error {
 	r.Log.Info("Handling DriftRemediation phase", "AutoIndexer", autoIndexerObj.Name)
+	driftDetected := autoIndexerObj.Annotations[utils.AutoIndexerDriftDetectedAnnotation]
+	lastClearTime := autoIndexerObj.Annotations[utils.AutoIndexerLastDriftClearedAnnotation]
+	lastDetectionTime := autoIndexerObj.Annotations[utils.AutoIndexerLastDriftDetectedAnnotation]
 
-	if autoIndexerObj.Annotations["autoindexer.kaito.sh/drift-detected"] == "true" {
-		r.Log.Info("Removing drift detected annotation", "AutoIndexer", autoIndexerObj.Name)
-		err := r.clearDriftAnnotations(ctx, autoIndexerObj)
-		if err != nil {
-			r.Log.Error(err, "failed to clear drift annotations", "AutoIndexer", autoIndexerObj.Name)
-			return err
-		}
+	if driftDetected != "true" {
+		r.Log.Info("No drift detected annotation found, exiting DriftRemediation phase", "AutoIndexer", autoIndexerObj.Name)
+		r.updateStatus(ctx, autoIndexerObj, autoindexerv1alpha1.AutoIndexerPhasePending, "NoDriftDetected", "No drift detected, resetting to Pending", nil)
 		return nil
+	}
+
+	if lastDetectionTime != "" && lastClearTime != "" {
+		if tDetect, err := time.Parse(time.RFC3339, lastDetectionTime); err == nil {
+			if tClear, err := time.Parse(time.RFC3339, lastClearTime); err == nil {
+				if tClear.After(tDetect) {
+					// drift already cleared
+					r.Log.Info("Drift was already cleared after last detection, exiting DriftRemediation phase", "AutoIndexer", autoIndexerObj.Name)
+					r.updateStatus(ctx, autoIndexerObj, autoindexerv1alpha1.AutoIndexerPhasePending, "NoDriftDetected", "No drift detected, resetting to Pending", nil)
+					return nil
+				}
+			}
+		}
 	}
 
 	runningJobs, _, _, _, err := r.getJobStatus(ctx, autoIndexerObj)
@@ -385,7 +398,7 @@ func (r *AutoIndexerReconciler) handleDriftRemediationPhase(ctx context.Context,
 		return err
 	}
 	if runningJobs > 0 {
-		r.Log.Info("Drift remediation job is still running", "AutoIndexer", autoIndexerObj.Name)
+		r.Log.Info("indexing job is still running", "AutoIndexer", autoIndexerObj.Name)
 		return nil
 	}
 
@@ -419,8 +432,11 @@ func (r *AutoIndexerReconciler) handleDriftRemediationPhase(ctx context.Context,
 		r.Log.Info("Reset LastIndexedCommit due to drift remediation", "AutoIndexer", autoIndexerObj.Name)
 	}
 
-	r.updateStatus(ctx, autoIndexerObj, autoindexerv1alpha1.AutoIndexerPhasePending, "DriftRemediated", "Drift remediation completed, resetting to Pending", nil)
-	return nil
+	// Update annotation to mark drift as cleared
+	// Next reconciliations will detect no drift and move back to Pending phase
+	existingAutoIndexerObj := autoIndexerObj.DeepCopy()
+	autoIndexerObj.Annotations[utils.AutoIndexerLastDriftClearedAnnotation] = time.Now().Format(time.RFC3339)
+	return r.updateAnnotations(ctx, autoIndexerObj, existingAutoIndexerObj)
 }
 
 // validateRAGEngineRef validates that the referenced RAGEngine exists
