@@ -719,25 +719,7 @@ func (r *AutoIndexerReconciler) ensureJob(ctx context.Context, autoIndexerObj *a
 func (r *AutoIndexerReconciler) deleteAutoIndexer(ctx context.Context, autoIndexerObj *autoindexerv1alpha1.AutoIndexer) (ctrl.Result, error) {
 	r.Log.Info("Deleting AutoIndexer", "autoindexer", autoIndexerObj.Name, "namespace", autoIndexerObj.Namespace)
 
-	// Clean up owned resources (Jobs, CronJobs, etc.)
-	// Wait for all owned Jobs to complete before removing the finalizer
-	jobs := &batchv1.JobList{}
-	if err := r.Client.List(ctx, jobs, client.InNamespace(autoIndexerObj.Namespace), client.MatchingLabels{
-		AutoIndexerNameLabel: autoIndexerObj.Name,
-	}); err != nil {
-		r.Log.Error(err, "failed to list jobs for deletion wait", "autoindexer", autoIndexerObj.Name)
-		return ctrl.Result{}, err
-	}
-	for _, job := range jobs.Items {
-		// If job is not completed or failed, requeue
-		if job.Status.Succeeded == 0 && job.Status.Failed == 0 {
-			r.Log.Info("Waiting for Job to complete before deleting AutoIndexer", "job", job.Name, "autoindexer", autoIndexerObj.Name)
-			return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
-		}
-	}
-
-	r.Log.Info("AutoIndexer deleted successfully", "autoindexer", autoIndexerObj.Name, "namespace", autoIndexerObj.Namespace)
-	return ctrl.Result{}, nil
+	return r.garbageCollectAutoIndexer(ctx, autoIndexerObj)
 }
 
 // SetupWithManager sets up the controller with the Manager.

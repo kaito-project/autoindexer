@@ -2,7 +2,6 @@ package controllers
 
 import (
 	"context"
-	"time"
 
 	autoindexerv1alpha1 "github.com/kaito-project/autoindexer/api/v1alpha1"
 	"github.com/kaito-project/autoindexer/pkg/autoindexer/utils"
@@ -13,8 +12,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
 
-// garbageCollectRAGEngine remove finalizer associated with ragengine object.
-func (r *AutoIndexerReconciler) garbageCollectRAGEngine(ctx context.Context, autoIndexerObj *autoindexerv1alpha1.AutoIndexer) (ctrl.Result, error) {
+// garbageCollectAutoIndexer remove finalizer associated with autoindexer object.
+func (r *AutoIndexerReconciler) garbageCollectAutoIndexer(ctx context.Context, autoIndexerObj *autoindexerv1alpha1.AutoIndexer) (ctrl.Result, error) {
 	r.Log.Info("garbageCollectAutoIndexer", "autoindexer", klog.KObj(autoIndexerObj))
 
 	// We need to remove the index within the RAG engine before removing the finalizer
@@ -23,14 +22,14 @@ func (r *AutoIndexerReconciler) garbageCollectRAGEngine(ctx context.Context, aut
 	if err := r.Client.List(ctx, jobs, client.InNamespace(autoIndexerObj.Namespace), client.MatchingLabels{
 		AutoIndexerNameLabel: autoIndexerObj.Name,
 	}); err != nil {
-		r.Log.Error(err, "failed to list jobs for deletion wait", "autoindexer", autoIndexerObj.Name)
+		r.Log.Error(err, "failed to list jobs for deletion wait", "autoindexer", klog.KObj(autoIndexerObj))
 		return ctrl.Result{}, err
 	}
 	for _, job := range jobs.Items {
-		// If job is not completed or failed, requeue
-		if job.Status.Succeeded == 0 && job.Status.Failed == 0 {
-			r.Log.Info("Waiting for Job to complete before deleting AutoIndexer", "job", job.Name, "autoindexer", autoIndexerObj.Name)
-			return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+		// If job is active, wait for it to complete
+		if job.Status.Active != 0 {
+			r.Log.Info("Waiting for Job to complete before deleting AutoIndexer", "job", job.Name, "autoindexer", klog.KObj(autoIndexerObj))
+			return ctrl.Result{}, nil
 		}
 	}
 
@@ -43,11 +42,11 @@ func (r *AutoIndexerReconciler) garbageCollectRAGEngine(ctx context.Context, aut
 
 	if controllerutil.RemoveFinalizer(autoIndexerObj, utils.AutoIndexerFinalizer) {
 		if updateErr := r.Update(ctx, autoIndexerObj, &client.UpdateOptions{}); updateErr != nil {
-			klog.ErrorS(updateErr, "failed to remove the finalizer from the autoindexer",
+			r.Log.Error(updateErr, "failed to remove the finalizer from the autoindexer",
 				"autoindexer", klog.KObj(autoIndexerObj))
 			return ctrl.Result{}, updateErr
 		}
-		klog.InfoS("successfully removed the autoindexer finalizers", "autoindexer", klog.KObj(autoIndexerObj))
+		r.Log.Info("successfully removed the autoindexer finalizers", "autoindexer", klog.KObj(autoIndexerObj))
 	}
 
 	return ctrl.Result{}, nil

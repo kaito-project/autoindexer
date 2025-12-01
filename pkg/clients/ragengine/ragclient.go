@@ -191,9 +191,9 @@ func (r *RAGEngineClientImpl) deleteIndexAttempt(ragEngineEndpoint, indexName st
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNotFound {
 		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("RAG engine returned non-200 status: %d, body: %s", resp.StatusCode, string(body))
+		return fmt.Errorf("RAG engine returned non-200 or 404 status: %d, body: %s", resp.StatusCode, string(body))
 	}
 
 	return nil
