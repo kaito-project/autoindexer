@@ -30,6 +30,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
+	"k8s.io/klog/v2"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
@@ -117,13 +118,29 @@ func (r *AutoIndexerReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 
 	r.Log.Info("Reconciling", "AutoIndexer", req.NamespacedName)
 
-	if !autoIndexerObj.DeletionTimestamp.IsZero() {
+	if autoIndexerObj.DeletionTimestamp.IsZero() {
+		if err := r.ensureFinalizer(ctx, autoIndexerObj); err != nil {
+			return ctrl.Result{}, err
+		}
+	} else {
 		r.Log.Info("AutoIndexer is being deleted, cleaning up resources", "AutoIndexer", req.NamespacedName)
 		return r.deleteAutoIndexer(ctx, autoIndexerObj)
 	}
 
 	r.Log.Info("AutoIndexer is being created or updated", "AutoIndexer", req.NamespacedName)
 	return r.syncAutoIndexer(ctx, autoIndexerObj)
+}
+
+func (r *AutoIndexerReconciler) ensureFinalizer(ctx context.Context, autoIndexerObj *autoindexerv1alpha1.AutoIndexer) error {
+	if !controllerutil.ContainsFinalizer(autoIndexerObj, utils.AutoIndexerFinalizer) {
+		patch := client.MergeFrom(autoIndexerObj.DeepCopy())
+		controllerutil.AddFinalizer(autoIndexerObj, utils.AutoIndexerFinalizer)
+		if err := r.Client.Patch(ctx, autoIndexerObj, patch); err != nil {
+			r.Log.Error(err, "failed to ensure the finalizer to the autoindexer", "autoindexer", klog.KObj(autoIndexerObj))
+			return err
+		}
+	}
+	return nil
 }
 
 // addAutoIndexer handles the reconciliation logic for creating/updating AutoIndexer
@@ -702,25 +719,7 @@ func (r *AutoIndexerReconciler) ensureJob(ctx context.Context, autoIndexerObj *a
 func (r *AutoIndexerReconciler) deleteAutoIndexer(ctx context.Context, autoIndexerObj *autoindexerv1alpha1.AutoIndexer) (ctrl.Result, error) {
 	r.Log.Info("Deleting AutoIndexer", "autoindexer", autoIndexerObj.Name, "namespace", autoIndexerObj.Namespace)
 
-	// Clean up owned resources (Jobs, CronJobs, etc.)
-	// Wait for all owned Jobs to complete before removing the finalizer
-	jobs := &batchv1.JobList{}
-	if err := r.Client.List(ctx, jobs, client.InNamespace(autoIndexerObj.Namespace), client.MatchingLabels{
-		AutoIndexerNameLabel: autoIndexerObj.Name,
-	}); err != nil {
-		r.Log.Error(err, "failed to list jobs for deletion wait", "autoindexer", autoIndexerObj.Name)
-		return ctrl.Result{}, err
-	}
-	for _, job := range jobs.Items {
-		// If job is not completed or failed, requeue
-		if job.Status.Succeeded == 0 && job.Status.Failed == 0 {
-			r.Log.Info("Waiting for Job to complete before deleting AutoIndexer", "job", job.Name, "autoindexer", autoIndexerObj.Name)
-			return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
-		}
-	}
-
-	r.Log.Info("AutoIndexer deleted successfully", "autoindexer", autoIndexerObj.Name, "namespace", autoIndexerObj.Namespace)
-	return ctrl.Result{}, nil
+	return r.garbageCollectAutoIndexer(ctx, autoIndexerObj)
 }
 
 // SetupWithManager sets up the controller with the Manager.

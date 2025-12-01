@@ -18,6 +18,7 @@ import (
 	"testing"
 
 	"github.com/go-logr/logr"
+	"github.com/stretchr/testify/mock"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
@@ -30,8 +31,29 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	autoindexerv1alpha1 "github.com/kaito-project/autoindexer/api/v1alpha1"
+	"github.com/kaito-project/autoindexer/pkg/autoindexer/utils"
 	kaitov1alpha1 "github.com/kaito-project/kaito/api/v1alpha1"
 )
+
+// MockRAGClient is a mock implementation of the RAGEngineClient interface for testing
+type MockRAGClientForControllerTest struct {
+	mock.Mock
+}
+
+func (m *MockRAGClientForControllerTest) GetDocumentCount(ragEngineName, indexName, autoindexerName, autoIndexerNamespace string) (int32, error) {
+	args := m.Called(ragEngineName, indexName, autoindexerName, autoIndexerNamespace)
+	return args.Get(0).(int32), args.Error(1)
+}
+
+func (m *MockRAGClientForControllerTest) ListIndexes(ragEngineName, indexName, autoindexerName, autoIndexerNamespace string) ([]string, error) {
+	args := m.Called(ragEngineName, indexName, autoindexerName, autoIndexerNamespace)
+	return args.Get(0).([]string), args.Error(1)
+}
+
+func (m *MockRAGClientForControllerTest) DeleteIndex(ragEngineName, indexName, autoIndexerNamespace string) error {
+	args := m.Called(ragEngineName, indexName, autoIndexerNamespace)
+	return args.Error(0)
+}
 
 func TestAutoIndexerReconciler_Reconcile(t *testing.T) {
 	scheme := runtime.NewScheme()
@@ -142,8 +164,13 @@ func TestAutoIndexerReconciler_deleteAutoIndexer(t *testing.T) {
 
 	autoIndexer := &autoindexerv1alpha1.AutoIndexer{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "test-autoindexer",
-			Namespace: "default",
+			Name:       "test-autoindexer",
+			Namespace:  "default",
+			Finalizers: []string{utils.AutoIndexerFinalizer},
+		},
+		Spec: autoindexerv1alpha1.AutoIndexerSpec{
+			RAGEngine: "test-ragengine",
+			IndexName: "test-index",
 		},
 	}
 
@@ -167,7 +194,19 @@ func TestAutoIndexerReconciler_deleteAutoIndexer(t *testing.T) {
 		Build()
 
 	recorder := record.NewFakeRecorder(10)
-	reconciler := NewAutoIndexerReconciler(client, scheme, logr.Discard(), recorder)
+	
+	// Create mock RAG client
+	mockRAGClient := &MockRAGClientForControllerTest{}
+	mockRAGClient.On("DeleteIndex", "test-ragengine", "test-index", "default").Return(nil)
+
+	// Create reconciler manually with mock instead of using NewAutoIndexerReconciler
+	reconciler := &AutoIndexerReconciler{
+		Client:    client,
+		Log:       logr.Discard(),
+		Scheme:    scheme,
+		Recorder:  recorder,
+		RAGClient: mockRAGClient,
+	}
 
 	ctx := context.Background()
 
@@ -179,6 +218,9 @@ func TestAutoIndexerReconciler_deleteAutoIndexer(t *testing.T) {
 	if result.RequeueAfter > 0 {
 		t.Error("deleteAutoIndexer should not request requeue when all jobs are completed")
 	}
+
+	// Verify that DeleteIndex was called
+	mockRAGClient.AssertExpectations(t)
 }
 
 func TestAutoIndexerReconciler_GetJobStatus(t *testing.T) {
