@@ -322,6 +322,7 @@ func (r *AutoIndexerReconciler) handleScheduledPhase(ctx context.Context, autoIn
 
 	if autoIndexerObj.Annotations[utils.AutoIndexerDriftDetectedAnnotation] == "true" {
 		if autoIndexerObj.Spec.DriftRemediationPolicy == nil || autoIndexerObj.Spec.DriftRemediationPolicy.Strategy == autoindexerv1alpha1.DriftRemediationStrategyIgnore {
+			// realistically we should never hit this since drift detection won't set the annotation if strategy is Ignore
 			r.Log.Info("Drift remediation strategy is Ignore, skipping remediation", "AutoIndexer", autoIndexerObj.Name)
 			return nil
 		}
@@ -391,6 +392,12 @@ func (r *AutoIndexerReconciler) handleFailedPhase(ctx context.Context, autoIndex
 func (r *AutoIndexerReconciler) handleDriftRemediationPhase(ctx context.Context, autoIndexerObj *autoindexerv1alpha1.AutoIndexer) error {
 	r.Log.Info("Handling DriftRemediation phase", "AutoIndexer", autoIndexerObj.Name)
 	driftDetected := autoIndexerObj.Annotations[utils.AutoIndexerDriftDetectedAnnotation]
+
+	if autoIndexerObj.Spec.DriftRemediationPolicy != nil && autoIndexerObj.Spec.DriftRemediationPolicy.Strategy == autoindexerv1alpha1.DriftRemediationStrategyIgnore {
+		r.Log.Info("Drift remediation strategy is Ignore, exiting DriftRemediation phase", "AutoIndexer", autoIndexerObj.Name)
+		r.updateStatus(ctx, autoIndexerObj, autoindexerv1alpha1.AutoIndexerPhasePending, "DriftRemediationIgnored", "Drift remediation strategy is Ignore, resetting to Pending", nil)
+		return nil
+	}
 
 	if driftDetected != "true" {
 		if autoIndexerObj.Spec.Suspend != nil && *autoIndexerObj.Spec.Suspend {

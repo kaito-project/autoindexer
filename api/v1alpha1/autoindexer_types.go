@@ -69,7 +69,8 @@ type AutoIndexerSpec struct {
 	// +optional
 	Suspend *bool `json:"suspend,omitempty"`
 
-	// DriftRemediationPolicy defines how to handle detected drift between expected and actual document counts
+	// DriftRemediationPolicy defines how to handle detected drift between expected and actual document counts within the index.
+	// Drift detection is only performed for AutoIndexers with a Schedule defined.
 	// +optional
 	// +kubebuilder:default={strategy: "Manual"}
 	DriftRemediationPolicy *DriftRemediationPolicy `json:"driftRemediationPolicy,omitempty"`
@@ -135,7 +136,7 @@ type StaticDataSourceSpec struct {
 	URLs []string `json:"urls"`
 }
 
-// DriftRemediationPolicy defines comprehensive drift handling policies
+// DriftRemediationPolicy defines the drift handling policies
 type DriftRemediationPolicy struct {
 	// Strategy defines the overall remediation approach
 	// +kubebuilder:validation:Required
@@ -147,8 +148,16 @@ type DriftRemediationPolicy struct {
 type DriftRemediationStrategy string
 
 const (
-	DriftRemediationStrategyAuto   DriftRemediationStrategy = "Auto"   // Always auto-remediate
+	// DriftRemediationStrategyAuto auto-remediates when drift is detected.
+	// When drift is detected, the AutoIndexer will delete the existing index, set NumOfDocumentInIndex to 0, and re-run indexing on the next scheduled run.
+	DriftRemediationStrategyAuto DriftRemediationStrategy = "Auto" // Always auto-remediate
+
+	// DriftRemediationStrategyManual requires manual intervention when drift is detected.
+	// When drift is detected, the AutoIndexer will enter the DriftRemediation phase and wait for user action.
 	DriftRemediationStrategyManual DriftRemediationStrategy = "Manual" // Always require manual intervention
+
+	// DriftRemediationStrategyIgnore ignores checking the AutoIndexer for drift.
+	// The drift detector will skip checking the AutoIndexer for drift, and the AutoIndexer will continue normal operation.
 	DriftRemediationStrategyIgnore DriftRemediationStrategy = "Ignore" // Ignore drift
 )
 

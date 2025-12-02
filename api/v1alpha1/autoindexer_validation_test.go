@@ -57,6 +57,22 @@ func TestDriftRemediationPolicy_Validation(t *testing.T) {
 			wantErr:     false,
 			description: "Nil policy should be valid, defaulting to Manual strategy",
 		},
+		{
+			name: "empty strategy should be invalid",
+			policy: &DriftRemediationPolicy{
+				Strategy: "",
+			},
+			wantErr:     true,
+			description: "Empty strategy should be invalid",
+		},
+		{
+			name: "invalid strategy should be invalid",
+			policy: &DriftRemediationPolicy{
+				Strategy: DriftRemediationStrategy("Invalid"),
+			},
+			wantErr:     true,
+			description: "Invalid strategy value should be rejected",
+		},
 	}
 
 	for _, tc := range testCases {
@@ -90,6 +106,93 @@ func TestDriftRemediationPolicy_Validation(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestDriftRemediationPolicy_ValidateFunction(t *testing.T) {
+	testCases := []struct {
+		name     string
+		policy   *DriftRemediationPolicy
+		wantErr  bool
+		errField string
+	}{
+		{
+			name: "valid Auto strategy",
+			policy: &DriftRemediationPolicy{
+				Strategy: DriftRemediationStrategyAuto,
+			},
+			wantErr: false,
+		},
+		{
+			name: "valid Manual strategy",
+			policy: &DriftRemediationPolicy{
+				Strategy: DriftRemediationStrategyManual,
+			},
+			wantErr: false,
+		},
+		{
+			name: "valid Ignore strategy",
+			policy: &DriftRemediationPolicy{
+				Strategy: DriftRemediationStrategyIgnore,
+			},
+			wantErr: false,
+		},
+		{
+			name:    "nil policy",
+			policy:  nil,
+			wantErr: false,
+		},
+		{
+			name: "empty strategy",
+			policy: &DriftRemediationPolicy{
+				Strategy: "",
+			},
+			wantErr:  true,
+			errField: "strategy",
+		},
+		{
+			name: "invalid strategy",
+			policy: &DriftRemediationPolicy{
+				Strategy: DriftRemediationStrategy("InvalidStrategy"),
+			},
+			wantErr:  true,
+			errField: "strategy",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.policy.validate()
+
+			if tc.wantErr && err == nil {
+				t.Errorf("Expected validation error, but got none")
+			}
+			if !tc.wantErr && err != nil {
+				t.Errorf("Expected no validation error, but got: %v", err)
+			}
+			if tc.wantErr && err != nil && tc.errField != "" {
+				// Check that the error is about the expected field
+				errStr := err.Error()
+				if !contains(errStr, tc.errField) {
+					t.Errorf("Expected error to mention field %s, but got: %v", tc.errField, err)
+				}
+			}
+		})
+	}
+}
+
+func contains(s, substr string) bool {
+	return len(s) >= len(substr) && (s == substr || (len(s) > len(substr) && 
+		(s[:len(substr)] == substr || s[len(s)-len(substr):] == substr || 
+		 indexOf(s, substr) >= 0)))
+}
+
+func indexOf(s, substr string) int {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return i
+		}
+	}
+	return -1
 }
 
 func TestGitDataSourceSpec_ValidatePatterns(t *testing.T) {
