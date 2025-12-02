@@ -321,6 +321,10 @@ func (r *AutoIndexerReconciler) handleScheduledPhase(ctx context.Context, autoIn
 	}
 
 	if autoIndexerObj.Annotations[utils.AutoIndexerDriftDetectedAnnotation] == "true" {
+		if autoIndexerObj.Spec.DriftRemediationPolicy == nil || autoIndexerObj.Spec.DriftRemediationPolicy.Strategy == autoindexerv1alpha1.DriftRemediationStrategyIgnore {
+			r.Log.Info("Drift remediation strategy is Ignore, skipping remediation", "AutoIndexer", autoIndexerObj.Name)
+			return nil
+		}
 		r.updateStatus(ctx, autoIndexerObj, autoindexerv1alpha1.AutoIndexerPhaseDriftRemediation, "DriftDetected", "Drift detected, entering remediation phase", nil)
 	}
 
@@ -399,6 +403,11 @@ func (r *AutoIndexerReconciler) handleDriftRemediationPhase(ctx context.Context,
 		}
 		r.Log.Info("No drift detected annotation found, exiting DriftRemediation phase", "AutoIndexer", autoIndexerObj.Name)
 		r.updateStatus(ctx, autoIndexerObj, autoindexerv1alpha1.AutoIndexerPhasePending, "NoDriftDetected", "No drift detected, resetting to Pending", nil)
+		return nil
+	}
+
+	if autoIndexerObj.Spec.DriftRemediationPolicy == nil || autoIndexerObj.Spec.DriftRemediationPolicy.Strategy == autoindexerv1alpha1.DriftRemediationStrategyManual {
+		r.Log.Info("Drift remediation strategy is Manual, waiting for user intervention", "AutoIndexer", autoIndexerObj.Name)
 		return nil
 	}
 

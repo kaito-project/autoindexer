@@ -71,7 +71,7 @@ type AutoIndexerSpec struct {
 
 	// DriftRemediationPolicy defines how to handle detected drift between expected and actual document counts
 	// +optional
-	// +kubebuilder:default={strategy: "Auto"}
+	// +kubebuilder:default={strategy: "Manual"}
 	DriftRemediationPolicy *DriftRemediationPolicy `json:"driftRemediationPolicy,omitempty"`
 }
 

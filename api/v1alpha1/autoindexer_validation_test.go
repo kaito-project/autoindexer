@@ -20,6 +20,78 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+func TestDriftRemediationPolicy_Validation(t *testing.T) {
+	testCases := []struct {
+		name        string
+		policy      *DriftRemediationPolicy
+		wantErr     bool
+		description string
+	}{
+		{
+			name: "valid Auto strategy",
+			policy: &DriftRemediationPolicy{
+				Strategy: DriftRemediationStrategyAuto,
+			},
+			wantErr:     false,
+			description: "Auto strategy should be valid",
+		},
+		{
+			name: "valid Manual strategy", 
+			policy: &DriftRemediationPolicy{
+				Strategy: DriftRemediationStrategyManual,
+			},
+			wantErr:     false,
+			description: "Manual strategy should be valid",
+		},
+		{
+			name: "valid Ignore strategy",
+			policy: &DriftRemediationPolicy{
+				Strategy: DriftRemediationStrategyIgnore,
+			},
+			wantErr:     false,
+			description: "Ignore strategy should be valid",
+		},
+		{
+			name:        "nil policy should be valid (defaults to Manual)",
+			policy:      nil,
+			wantErr:     false,
+			description: "Nil policy should be valid, defaulting to Manual strategy",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			autoIndexer := &AutoIndexer{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test",
+					Namespace: "default",
+				},
+				Spec: AutoIndexerSpec{
+					RAGEngine: "test-ragengine",
+					IndexName: "test-index",
+					DataSource: DataSourceSpec{
+						Type: DataSourceTypeGit,
+						Git: &GitDataSourceSpec{
+							Repository: "https://github.com/example/repo",
+							Branch:     "main",
+						},
+					},
+					DriftRemediationPolicy: tc.policy,
+				},
+			}
+
+			err := autoIndexer.validateCreate()
+
+			if tc.wantErr && err == nil {
+				t.Errorf("Expected validation error for %s, but got none", tc.description)
+			}
+			if !tc.wantErr && err != nil {
+				t.Errorf("Expected no validation error for %s, but got: %v", tc.description, err)
+			}
+		})
+	}
+}
+
 func TestGitDataSourceSpec_ValidatePatterns(t *testing.T) {
 	testCases := []struct {
 		name         string
