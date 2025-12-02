@@ -64,6 +64,12 @@ func (a *AutoIndexer) validateCreate() (errs *apis.FieldError) {
 	if err := a.Spec.DataSource.validate(); err != nil {
 		errs = errs.Also(err.ViaField("dataSource"))
 	}
+	// Validate DriftRemediationPolicy if present
+	if a.Spec.DriftRemediationPolicy != nil {
+		if err := a.Spec.DriftRemediationPolicy.validate(); err != nil {
+			errs = errs.Also(err.ViaField("driftRemediationPolicy"))
+		}
+	}
 	// Validate Credentials if present
 	if a.Spec.Credentials != nil {
 		if a.Spec.Credentials.Type == "" {
@@ -183,4 +189,20 @@ func (s *StaticDataSourceSpec) validate() *apis.FieldError {
 
 func (a *AutoIndexerSpec) validateUpdate(old AutoIndexerSpec) (errs *apis.FieldError) {
 	return nil
+}
+
+func (d *DriftRemediationPolicy) validate() *apis.FieldError {
+	if d == nil {
+		return nil
+	}
+	
+	// Validate that the strategy is one of the allowed values
+	switch d.Strategy {
+	case DriftRemediationStrategyAuto, DriftRemediationStrategyManual, DriftRemediationStrategyIgnore:
+		return nil
+	case "":
+		return apis.ErrMissingField("strategy")
+	default:
+		return apis.ErrInvalidValue(string(d.Strategy), "strategy")
+	}
 }

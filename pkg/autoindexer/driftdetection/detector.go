@@ -158,6 +158,13 @@ func (d *DriftDetectorImpl) checkAutoIndexerDrift(ctx context.Context, autoIndex
 		Action:               DriftActionNone,
 	}
 
+	if autoIndexer.Spec.DriftRemediationPolicy != nil && autoIndexer.Spec.DriftRemediationPolicy.Strategy == autoindexerv1alpha1.DriftRemediationStrategyIgnore {
+		d.logger.V(1).Info("Drift remediation strategy is set to Ignore, skipping drift check",
+			"autoindexer", autoIndexer.Name,
+			"namespace", autoIndexer.Namespace)
+		return result
+	}
+
 	// Skip if AutoIndexer is not in a stable state
 	if !d.isAutoIndexerInStableState(autoIndexer) {
 		d.logger.V(1).Info("Skipping drift check for AutoIndexer not in stable state",

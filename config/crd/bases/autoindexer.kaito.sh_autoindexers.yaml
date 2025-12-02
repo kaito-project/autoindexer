@@ -153,6 +153,27 @@ spec:
                 required:
                 - type
                 type: object
+              driftRemediationPolicy:
+                default:
+                  strategy: Manual
+                description: DriftRemediationPolicy defines how to handle detected
+                  drift between expected and actual document counts
+                properties:
+                  strategy:
+                    allOf:
+                    - enum:
+                      - Auto
+                      - Manual
+                      - Ignore
+                    - enum:
+                      - Auto
+                      - Manual
+                      - Ignore
+                    description: Strategy defines the overall remediation approach
+                    type: string
+                required:
+                - strategy
+                type: object
               indexName:
                 description: IndexName is the name of the index where documents will
                   be stored

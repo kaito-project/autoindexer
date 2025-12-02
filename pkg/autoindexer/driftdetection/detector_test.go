@@ -232,13 +232,107 @@ func TestDriftDetector_CheckAutoIndexerDrift(t *testing.T) {
 					IndexName: "test-index",
 				},
 				Status: autoindexerv1alpha1.AutoIndexerStatus{
-					IndexingPhase:        autoindexerv1alpha1.AutoIndexerPhaseCompleted,
+					IndexingPhase:        autoindexerv1alpha1.AutoIndexerPhaseScheduled,
 					NumOfDocumentInIndex: 10,
 				},
 			},
 			mockDocumentCount: 5,
 			mockError:         nil,
-			expectedDrift:     false,
+			expectedDrift:     true,
+			expectedError:     false,
+		},
+		{
+			name: "skip drift check when remediation policy is Ignore",
+			autoIndexer: &autoindexerv1alpha1.AutoIndexer{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-ai",
+					Namespace: "default",
+				},
+				Spec: autoindexerv1alpha1.AutoIndexerSpec{
+					RAGEngine: "test-rag",
+					IndexName: "test-index",
+					DriftRemediationPolicy: &autoindexerv1alpha1.DriftRemediationPolicy{
+						Strategy: autoindexerv1alpha1.DriftRemediationStrategyIgnore,
+					},
+				},
+				Status: autoindexerv1alpha1.AutoIndexerStatus{
+					IndexingPhase:        autoindexerv1alpha1.AutoIndexerPhaseScheduled,
+					NumOfDocumentInIndex: 10,
+				},
+			},
+			mockDocumentCount: 5,
+			mockError:         nil,
+			expectedDrift:     false, // Should skip drift check when policy is Ignore
+			expectedError:     false,
+		},
+		{
+			name: "detect drift when remediation policy is Auto",
+			autoIndexer: &autoindexerv1alpha1.AutoIndexer{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-ai",
+					Namespace: "default",
+				},
+				Spec: autoindexerv1alpha1.AutoIndexerSpec{
+					RAGEngine: "test-rag",
+					IndexName: "test-index",
+					DriftRemediationPolicy: &autoindexerv1alpha1.DriftRemediationPolicy{
+						Strategy: autoindexerv1alpha1.DriftRemediationStrategyAuto,
+					},
+				},
+				Status: autoindexerv1alpha1.AutoIndexerStatus{
+					IndexingPhase:        autoindexerv1alpha1.AutoIndexerPhaseScheduled,
+					NumOfDocumentInIndex: 10,
+				},
+			},
+			mockDocumentCount: 5,
+			mockError:         nil,
+			expectedDrift:     true, // Should detect drift when policy is Auto
+			expectedError:     false,
+		},
+		{
+			name: "detect drift when remediation policy is Manual",
+			autoIndexer: &autoindexerv1alpha1.AutoIndexer{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-ai",
+					Namespace: "default",
+				},
+				Spec: autoindexerv1alpha1.AutoIndexerSpec{
+					RAGEngine: "test-rag",
+					IndexName: "test-index",
+					DriftRemediationPolicy: &autoindexerv1alpha1.DriftRemediationPolicy{
+						Strategy: autoindexerv1alpha1.DriftRemediationStrategyManual,
+					},
+				},
+				Status: autoindexerv1alpha1.AutoIndexerStatus{
+					IndexingPhase:        autoindexerv1alpha1.AutoIndexerPhaseScheduled,
+					NumOfDocumentInIndex: 10,
+				},
+			},
+			mockDocumentCount: 5,
+			mockError:         nil,
+			expectedDrift:     true, // Should detect drift when policy is Manual
+			expectedError:     false,
+		},
+		{
+			name: "detect drift when no remediation policy set (default behavior)",
+			autoIndexer: &autoindexerv1alpha1.AutoIndexer{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-ai",
+					Namespace: "default",
+				},
+				Spec: autoindexerv1alpha1.AutoIndexerSpec{
+					RAGEngine: "test-rag",
+					IndexName: "test-index",
+					// No DriftRemediationPolicy set
+				},
+				Status: autoindexerv1alpha1.AutoIndexerStatus{
+					IndexingPhase:        autoindexerv1alpha1.AutoIndexerPhaseScheduled,
+					NumOfDocumentInIndex: 10,
+				},
+			},
+			mockDocumentCount: 5,
+			mockError:         nil,
+			expectedDrift:     true, // Should detect drift when no policy is set
 			expectedError:     false,
 		},
 		{
@@ -368,3 +462,189 @@ func TestDriftDetector_SetStatusToDriftRemediation(t *testing.T) {
 	assert.Equal(t, autoindexerv1alpha1.AutoIndexerPhaseDriftRemediation, updatedAutoIndexer.Status.IndexingPhase)
 }
 */
+
+func TestDriftDetector_SetDriftDetectedAnnotations(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = autoindexerv1alpha1.AddToScheme(scheme)
+
+	tests := []struct {
+		name        string
+		autoIndexer *autoindexerv1alpha1.AutoIndexer
+		expectError bool
+	}{
+		{
+			name: "set annotations on AutoIndexer without existing annotations",
+			autoIndexer: &autoindexerv1alpha1.AutoIndexer{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-ai",
+					Namespace: "default",
+				},
+				Spec: autoindexerv1alpha1.AutoIndexerSpec{
+					RAGEngine: "test-rag",
+					IndexName: "test-index",
+				},
+				Status: autoindexerv1alpha1.AutoIndexerStatus{
+					IndexingPhase: autoindexerv1alpha1.AutoIndexerPhaseScheduled,
+				},
+			},
+			expectError: false,
+		},
+		{
+			name: "set annotations on AutoIndexer with existing annotations",
+			autoIndexer: &autoindexerv1alpha1.AutoIndexer{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-ai",
+					Namespace: "default",
+					Annotations: map[string]string{
+						"existing-annotation": "value",
+					},
+				},
+				Spec: autoindexerv1alpha1.AutoIndexerSpec{
+					RAGEngine: "test-rag",
+					IndexName: "test-index",
+				},
+				Status: autoindexerv1alpha1.AutoIndexerStatus{
+					IndexingPhase: autoindexerv1alpha1.AutoIndexerPhaseScheduled,
+				},
+			},
+			expectError: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			client := fake.NewClientBuilder().WithScheme(scheme).WithObjects(tt.autoIndexer).Build()
+			ragClient := &MockRAGEngineClient{}
+			config := DefaultDriftDetectionConfig()
+
+			detector := &DriftDetectorImpl{
+				client:    client,
+				ragClient: ragClient,
+				config:    config,
+				logger:    logr.Discard(),
+				stopCh:    make(chan struct{}),
+			}
+
+			ctx := context.Background()
+			err := detector.setDriftDetected(ctx, tt.autoIndexer)
+
+			if tt.expectError {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+				
+				// Verify annotations were set
+				assert.Equal(t, "true", tt.autoIndexer.Annotations["autoindexer.kaito.sh/drift-detected"])
+				assert.NotEmpty(t, tt.autoIndexer.Annotations["autoindexer.kaito.sh/last-drift-detected"])
+				
+				// Verify existing annotations are preserved
+				if existingValue, exists := tt.autoIndexer.Annotations["existing-annotation"]; exists {
+					assert.Equal(t, "value", existingValue)
+				}
+			}
+		})
+	}
+}
+
+func TestDriftDetector_SetDriftRemediatedAnnotations(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = autoindexerv1alpha1.AddToScheme(scheme)
+
+	tests := []struct {
+		name               string
+		autoIndexer        *autoindexerv1alpha1.AutoIndexer
+		expectError        bool
+		shouldUpdateClient bool
+	}{
+		{
+			name: "clear drift annotation when it exists and is true",
+			autoIndexer: &autoindexerv1alpha1.AutoIndexer{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-ai",
+					Namespace: "default",
+					Annotations: map[string]string{
+						"autoindexer.kaito.sh/drift-detected": "true",
+					},
+				},
+				Spec: autoindexerv1alpha1.AutoIndexerSpec{
+					RAGEngine: "test-rag",
+					IndexName: "test-index",
+				},
+				Status: autoindexerv1alpha1.AutoIndexerStatus{
+					IndexingPhase: autoindexerv1alpha1.AutoIndexerPhaseScheduled,
+				},
+			},
+			expectError:        false,
+			shouldUpdateClient: true,
+		},
+		{
+			name: "no update when annotation doesn't exist",
+			autoIndexer: &autoindexerv1alpha1.AutoIndexer{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-ai",
+					Namespace: "default",
+				},
+				Spec: autoindexerv1alpha1.AutoIndexerSpec{
+					RAGEngine: "test-rag",
+					IndexName: "test-index",
+				},
+				Status: autoindexerv1alpha1.AutoIndexerStatus{
+					IndexingPhase: autoindexerv1alpha1.AutoIndexerPhaseScheduled,
+				},
+			},
+			expectError:        false,
+			shouldUpdateClient: false,
+		},
+		{
+			name: "no update when annotation is already false",
+			autoIndexer: &autoindexerv1alpha1.AutoIndexer{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-ai",
+					Namespace: "default",
+					Annotations: map[string]string{
+						"autoindexer.kaito.sh/drift-detected": "false",
+					},
+				},
+				Spec: autoindexerv1alpha1.AutoIndexerSpec{
+					RAGEngine: "test-rag",
+					IndexName: "test-index",
+				},
+				Status: autoindexerv1alpha1.AutoIndexerStatus{
+					IndexingPhase: autoindexerv1alpha1.AutoIndexerPhaseScheduled,
+				},
+			},
+			expectError:        false,
+			shouldUpdateClient: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			client := fake.NewClientBuilder().WithScheme(scheme).WithObjects(tt.autoIndexer).Build()
+			ragClient := &MockRAGEngineClient{}
+			config := DefaultDriftDetectionConfig()
+
+			detector := &DriftDetectorImpl{
+				client:    client,
+				ragClient: ragClient,
+				config:    config,
+				logger:    logr.Discard(),
+				stopCh:    make(chan struct{}),
+			}
+
+			ctx := context.Background()
+			err := detector.setDriftRemediated(ctx, tt.autoIndexer)
+
+			if tt.expectError {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+				
+				if tt.shouldUpdateClient {
+					// Verify annotation was set to false
+					assert.Equal(t, "false", tt.autoIndexer.Annotations["autoindexer.kaito.sh/drift-detected"])
+				}
+			}
+		})
+	}
+}

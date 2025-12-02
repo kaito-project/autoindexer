@@ -68,6 +68,12 @@ type AutoIndexerSpec struct {
 	// This will also suspend any drift detection for data sources
 	// +optional
 	Suspend *bool `json:"suspend,omitempty"`
+
+	// DriftRemediationPolicy defines how to handle detected drift between expected and actual document counts within the index.
+	// Drift detection is only performed for AutoIndexers with a Schedule defined.
+	// +optional
+	// +kubebuilder:default={strategy: "Manual"}
+	DriftRemediationPolicy *DriftRemediationPolicy `json:"driftRemediationPolicy,omitempty"`
 }
 
 // DataSourceSpec defines the source of documents to be indexed
@@ -129,6 +135,31 @@ type StaticDataSourceSpec struct {
 	// +kubebuilder:validation:Required
 	URLs []string `json:"urls"`
 }
+
+// DriftRemediationPolicy defines the drift handling policies
+type DriftRemediationPolicy struct {
+	// Strategy defines the overall remediation approach
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:Enum=Auto;Manual;Ignore
+	Strategy DriftRemediationStrategy `json:"strategy"`
+}
+
+// +kubebuilder:validation:Enum=Auto;Manual;Ignore
+type DriftRemediationStrategy string
+
+const (
+	// DriftRemediationStrategyAuto auto-remediates when drift is detected.
+	// When drift is detected, the AutoIndexer will delete the existing index, set NumOfDocumentInIndex to 0, and re-run indexing on the next scheduled run.
+	DriftRemediationStrategyAuto DriftRemediationStrategy = "Auto" // Always auto-remediate
+
+	// DriftRemediationStrategyManual requires manual intervention when drift is detected.
+	// When drift is detected, the AutoIndexer will enter the DriftRemediation phase and wait for user action.
+	DriftRemediationStrategyManual DriftRemediationStrategy = "Manual" // Always require manual intervention
+
+	// DriftRemediationStrategyIgnore ignores checking the AutoIndexer for drift.
+	// The drift detector will skip checking the AutoIndexer for drift, and the AutoIndexer will continue normal operation.
+	DriftRemediationStrategyIgnore DriftRemediationStrategy = "Ignore" // Ignore drift
+)
 
 // CredentialsSpec defines authentication credentials
 type CredentialsSpec struct {
