@@ -1,6 +1,16 @@
 name: "e2e-base-setup"
 description: "Composite action for e2e base setup"
 
+on:
+  workflow_call:
+    secrets:
+      AZURE_CLIENT_ID:
+        required: true
+      AZURE_TENANT_ID:
+        required: true
+      AZURE_SUBSCRIPTION_ID:
+        required: true
+
 inputs:
   git_sha:
     description: "Git commit SHA"
