@@ -1,4 +1,4 @@
-name: ragengine-e2e-test
+name: autoindexer-e2e-test
 
 on:
   workflow_dispatch:
