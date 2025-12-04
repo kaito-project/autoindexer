@@ -64,17 +64,19 @@ jobs:
       - name: Build AutoIndexer Controller Image
         shell: bash
         run: |
+          az acr login --name ${{ env.REGISTRY }}
           make docker-build-autoindexer
         env:
-          REGISTRY: ${{ env.CLUSTER_NAME }}.azurecr.io
+          REGISTRY: ${{ env.CLUSTER_NAME }}
       
       - name: Build AutoIndexer Job Image
         shell: bash
         run: |
+          az acr login --name ${{ env.REGISTRY }}
           make docker-build-autoindexer-job
         env:
-          REGISTRY: ${{ env.CLUSTER_NAME }}.azurecr.io
-
+          REGISTRY: ${{ env.CLUSTER_NAME }}
+      
       - name: Set up Go ${{ env.GO_VERSION }}
         uses: actions/setup-go@v5.5.0
         with:
@@ -95,4 +97,7 @@ jobs:
       
       - name: Run e2e test
         run: |
+          az aks get-credentials --name "${{ env.CLUSTER_NAME }}" --resource-group "${{ env.CLUSTER_NAME }}" --overwrite-existing
           make autoindexer-e2e-test
+        env:
+          CLUSTER_NAME: ${{ env.CLUSTER_NAME }}
