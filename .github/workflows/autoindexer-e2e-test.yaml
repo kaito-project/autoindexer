@@ -67,7 +67,7 @@ jobs:
           az acr login --name ${{ env.REGISTRY }}
           make docker-build-autoindexer
         env:
-          REGISTRY: ${{ env.CLUSTER_NAME }}
+          REGISTRY: ${{ env.CLUSTER_NAME }}.azurecr.io
       
       - name: Build AutoIndexer Job Image
         shell: bash
@@ -75,7 +75,7 @@ jobs:
           az acr login --name ${{ env.REGISTRY }}
           make docker-build-autoindexer-job
         env:
-          REGISTRY: ${{ env.CLUSTER_NAME }}
+          REGISTRY: ${{ env.CLUSTER_NAME }}.azurecr.io
       
       - name: Set up Go ${{ env.GO_VERSION }}
         uses: actions/setup-go@v5.5.0
