@@ -81,7 +81,6 @@ runs:
       with:
         inlineScript: |
           az acr create --name "${{ env.CLUSTER_NAME }}" --resource-group "${{ env.CLUSTER_NAME }}" --sku Standard --admin-enabled -o none
-          az acr login  --name "${{ env.CLUSTER_NAME }}"
 
     - name: Create Azure Identity
       uses: azure/CLI@v2.1.0
