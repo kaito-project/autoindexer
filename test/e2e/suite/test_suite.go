@@ -27,7 +27,7 @@ func RunE2ETestSuite(ctx context.Context) error {
 
 	// Add Tests Here
 	allTests := []types.Test{
-		autoindexerTests.NewAutoIndexerOneTimeStaticTest("static-one-time-ai", "default", "ragengine", "static-one-time-index", 5789),
+		autoindexerTests.NewAutoIndexerOneTimeStaticTest("static-one-time-ai", "default", "ragengine", "static-one-time-index", 5789), // To run test concurrently, make sure the local port forwards are different
 		autoindexerTests.NewAutoIndexerSchedulesStaticTest("static-scheduled-ai", "default", "ragengine-static-scheduled", "static-scheduled-index", "*/5 * * * *", 5790),
 	}
 

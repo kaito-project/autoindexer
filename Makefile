@@ -41,6 +41,15 @@ autoindexer-job-test: ## Run AutoIndexer job tests with pytest.
 	pytest --cov -o log_cli=true -o log_cli_level=INFO jobs/autoindexer/tests
 
 ## --------------------------------------
+## E2E Tests
+## --------------------------------------
+
+.PHONY: autoindexer-e2e-test
+autoindexer-e2e-test: ## Run AutoIndexer e2e tests with go test
+	go build -o test-e2e ./cmd/e2e/main.go
+	./test-e2e
+
+## --------------------------------------
 ## Docker
 ## --------------------------------------
 

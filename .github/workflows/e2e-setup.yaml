@@ -1,0 +1,140 @@
+name: "e2e-base-setup"
+description: "Composite action for e2e base setup"
+
+inputs:
+  git_sha:
+    description: "Git commit SHA"
+    required: true
+  region:
+    description: "the azure location to run the e2e test in"
+    required: false
+    default: "eastus"
+
+outputs:
+  cluster_name:
+    description: "Cluster name"
+  registry:
+    description: "Registry value"
+
+env:
+  GO_VERSION: "1.24"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Checkout
+      uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      with:
+        ref: ${{ inputs.git_sha }}
+
+    - name: Set e2e Resource and Cluster Name
+      shell: bash
+      run: |
+        ID="ri${{ github.run_id }}rn${{ github.run_number }}ra${{ github.run_attempt }}"
+
+        echo "VERSION=${ID}" >> $GITHUB_ENV
+        echo "CLUSTER_NAME=autoindexer${ID}" >> $GITHUB_ENV
+        echo "REGISTRY=autoindexer${ID}.azurecr.io" >> $GITHUB_ENV
+
+    - name: Remove existing Go modules directory
+      shell: bash
+      run: sudo rm -rf ~/go/pkg/mod
+
+    - name: Set up Go 1.24
+      uses: actions/setup-go@v5.2.0
+      with:
+        go-version: "1.24"
+
+    - name: Install Azure CLI latest
+      shell: bash
+      run: |
+        if ! which az > /dev/null; then
+          echo "Azure CLI not found. Installing..."
+          curl -sL https://aka.ms/InstallAzureCLIDeb | sudo bash
+        else
+          echo "Azure CLI already installed."
+        fi
+
+    - name: Azure login
+      uses: azure/login@v2
+      with:
+        client-id: ${{ secrets.AZURE_CLIENT_ID }}
+        tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+        subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+    - name: Install Helm
+      uses: azure/setup-helm@v4
+    
+    - name: Create Resource Group
+      uses: azure/CLI@v2.1.0
+      with:
+        inlineScript: |
+          az group create --name "${{ env.CLUSTER_NAME }}" --location "${{ inputs.region }}" -o none
+    
+    - name: Create ACR
+      uses: azure/CLI@v2.1.0
+      with:
+        inlineScript: |
+          az acr create --name "${{ env.CLUSTER_NAME }}" --resource-group "${{ env.CLUSTER_NAME }}" --sku Standard --admin-enabled -o none
+          az acr login  --name "${{ env.CLUSTER_NAME }}"
+
+    - name: Create Azure Identity
+      uses: azure/CLI@v2.1.0
+      with:
+        inlineScript: |
+          az identity create --name "gpuprovisionerIdentity" --resource-group "${{ env.CLUSTER_NAME }}"
+    
+    - name: Create Cluster
+      uses: azure/CLI@v2.1.0
+      with:
+        inlineScript: |
+          az aks create  --name "${{ env.CLUSTER_NAME }}" --resource-group "${{ env.CLUSTER_NAME }}" \
+          --location "${{ inputs.region }}" --attach-acr "${{ env.CLUSTER_NAME }}" \
+          --kubernetes-version "${{ inputs.k8s_version }}" --generate-ssh-keys  \
+          --enable-managed-identity --enable-workload-identity --enable-oidc-issuer --node-vm-size Standard_D2d_v4 -o none
+          az aks get-credentials --name "${{ env.CLUSTER_NAME }}" --resource-group "${{ env.CLUSTER_NAME }}" --overwrite-existing
+
+    - name: Create Identity Federated Credential for gpuprovisioner
+      uses: azure/CLI@v2.1.0
+      with:
+        inlineScript: |
+          AKS_OIDC_ISSUER=$(az aks show --name "${{ env.CLUSTER_NAME }}" --resource-group "${{ env.CLUSTER_NAME }}" --query "oidcIssuerProfile.issuerUrl" -o tsv)
+          az identity federated-credential create --name gpuprovisioner-fed \
+          --identity-name "gpuprovisionerIdentity" --resource-group "${{ env.CLUSTER_NAME }}" \
+          --issuer "${AKS_OIDC_ISSUER}" --audience api://AzureADTokenExchange \
+          --subject system:serviceaccount:gpu-provisioner:gpu-provisioner
+          IDENTITY_PRINCIPAL_ID=$(az identity show --name "gpuprovisionerIdentity" --resource-group "${{ env.CLUSTER_NAME }}" --query "principalId" -o tsv)
+          AZURE_RESOURCE_GROUP_RESOURCE_ID=$(az group show --name "${{ env.CLUSTER_NAME }}" --query "id" -o tsv)
+          az role assignment create --assignee "$IDENTITY_PRINCIPAL_ID" \
+          --scope "$AZURE_RESOURCE_GROUP_RESOURCE_ID" \
+          --role "Contributor"
+
+    - name: Install gpu-provisioner
+      shell: bash
+      run: |
+        # Download and configure Helm values
+        curl -sO https://raw.githubusercontent.com/Azure/gpu-provisioner/main/hack/deploy/configure-helm-values.sh
+        chmod +x ./configure-helm-values.sh && ./configure-helm-values.sh $CLUSTER_NAME $RESOURCE_GROUP $IDENTITY_NAME
+
+        # Install GPU provisioner
+        helm install gpu-provisioner \
+          --values gpu-provisioner-values.yaml \
+          --set settings.azure.clusterName=$CLUSTER_NAME \
+          --wait \
+          https://github.com/Azure/gpu-provisioner/raw/gh-pages/charts/gpu-provisioner-$GPU_PROVISIONER_VERSION.tgz \
+          --namespace gpu-provisioner \
+          --create-namespace
+      env:
+        GPU_PROVISIONER_VERSION: "0.3.6"
+        IDENTITY_NAME: "gpuprovisionerIdentity"
+        RESOURCE_GROUP: ${{ env.CLUSTER_NAME }}
+        CLUSTER_NAME: ${{ env.CLUSTER_NAME }}
+
+    - name: Install KAITO RAGEngine helm chart
+      shell: bash
+      run: |
+        helm repo add kaito https://kaito-project.github.io/kaito/charts/kaito
+        helm repo update
+        helm upgrade --install kaito-ragengine kaito/ragengine \
+          --namespace kaito-ragengine \
+          --create-namespace

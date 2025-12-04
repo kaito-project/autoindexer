@@ -1,0 +1,99 @@
+name: ragengine-e2e-test
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+env:
+  GO_VERSION: "1.24"
+
+permissions:
+  id-token: write # This is required for requesting the JWT
+  contents: read # This is required for actions/checkout
+
+on:
+  workflow_call:
+    inputs:
+      git_sha:
+        type: string
+        required: true
+      region:
+        type: string
+        description: "the azure location to run the e2e test in"
+        default: "swedencentral"
+      k8s_version:
+        type: string
+        default: "1.31.10"
+
+jobs:
+  e2e-tests:
+    runs-on: ubuntu-latest
+    env:
+      GO_VERSION: "1.24"
+
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@f4a75cfd619ee5ce8d5b864b0d183aff3c69b55a # v2.13.1
+        with:
+          egress-policy: audit
+          disable-sudo: true
+          disable-telemetry: true
+
+      - name: Checkout
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          ref: ${{ inputs.git_sha }}
+
+      - name: Run e2e-base-setup composite action
+        id: base-setup
+        uses: ./.github/e2e-setup
+        with:
+          git_sha: ${{ inputs.git_sha }}
+          region: ${{ inputs.region }}
+          k8s_version: ${{ inputs.k8s_version }}
+      
+      - name: Azure login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      
+      - name: Build AutoIndexer Controller Image
+        shell: bash
+        run: |
+          make docker-build-autoindexer
+        env:
+          REGISTRY: ${{ env.CLUSTER_NAME }}.azurecr.io
+      
+      - name: Build AutoIndexer Job Image
+        shell: bash
+        run: |
+          make docker-build-autoindexer-job
+        env:
+          REGISTRY: ${{ env.CLUSTER_NAME }}.azurecr.io
+      
+      - name: Remove existing Go modules directory
+        run: sudo rm -rf ~/go/pkg/mod
+
+      - name: Set up Go ${{ env.GO_VERSION }}
+        uses: actions/setup-go@v5.5.0
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+      
+      - name: Install AutoIndexer helm chart
+        shell: bash
+        run: |
+          make az-patch-install-autoindexer-helm-e2e
+          kubectl wait --for=condition=available deploy "kaito-autoindexer" -n kaito-autoindexer --timeout=300s
+        env:
+          REGISTRY: ${{ env.CLUSTER_NAME }}.azurecr.io
+          AZURE_RESOURCE_GROUP: ${{ env.CLUSTER_NAME }}
+          AZURE_CLUSTER_NAME: ${{ env.CLUSTER_NAME }}
+      
+      - name: Run e2e test
+        run: |
+          make autoindexer-e2e-test
