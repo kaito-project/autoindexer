@@ -1,5 +1,21 @@
 name: ragengine-e2e-test
 
+on:
+  workflow_dispatch:
+    inputs:
+      git_sha:
+        description: "Git commit SHA"
+        required: true
+        default: "main"
+      region:
+        description: "the azure location to run the e2e test in"
+        required: false
+        default: "eastus"
+      k8s_version:
+        description: "the kubernetes version for the aks cluster"
+        required: false
+        default: "1.28.6"
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
   cancel-in-progress: true
