@@ -89,12 +89,10 @@ class DataSourceHandler(ABC):
         )
         
         if errors:
-            status_update["errorIndexingCount"] = current_status.get("errorIndexingCount", 0) + 1
             conditions["AutoIndexerError"] = autoindexer_client._create_condition(
                 "AutoIndexerError", "True", "IndexingErrors", f"Indexing completed with errors: {errors}", observed_generation=current_generation
             )
         else:
-            status_update["successfulIndexingCount"] = current_status.get("successfulIndexingCount", 0) + 1
             conditions["AutoIndexerError"] = autoindexer_client._create_condition(
                 "AutoIndexerError", "False", "IndexingCompleted", "No errors during indexing", observed_generation=current_generation
             )
