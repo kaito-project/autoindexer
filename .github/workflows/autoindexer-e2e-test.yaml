@@ -14,7 +14,7 @@ on:
       k8s_version:
         description: "the kubernetes version for the aks cluster"
         required: false
-        default: "1.28.6"
+        default: "1.31.10"
   push:
     branches:
       - brfole/e2e

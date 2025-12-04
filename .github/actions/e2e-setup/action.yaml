@@ -9,6 +9,10 @@ inputs:
     description: "the azure location to run the e2e test in"
     required: false
     default: "eastus"
+  k8s_version:
+    description: "the kubernetes version for the aks cluster"
+    required: false
+    default: "1.31.10"
 
 outputs:
   cluster_name:
@@ -38,7 +42,7 @@ runs:
         echo "REGION=${{ env.REGION }}" >> $GITHUB_ENV
         echo "K8S_VERSION=${{ env.K8S_VERSION }}" >> $GITHUB_ENV
       env:
-        REGION: ${{ inputs.region }}
+        REGION: eastus
         K8S_VERSION: ${{ inputs.k8s_version }}
 
     - name: Set up Go 1.24
