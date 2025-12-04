@@ -11,26 +11,8 @@ permissions:
   id-token: write # This is required for requesting the JWT
   contents: read # This is required for actions/checkout
 
-on:
-  workflow_call:
-    inputs:
-      git_sha:
-        type: string
-        required: true
-      region:
-        type: string
-        description: "the azure location to run the e2e test in"
-        default: "swedencentral"
-      k8s_version:
-        type: string
-        default: "1.31.10"
-
 jobs:
   e2e-tests:
-    runs-on: ubuntu-latest
-    env:
-      GO_VERSION: "1.24"
-
     steps:
       - name: Harden Runner
         uses: step-security/harden-runner@f4a75cfd619ee5ce8d5b864b0d183aff3c69b55a # v2.13.1
