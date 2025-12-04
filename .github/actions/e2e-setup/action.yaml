@@ -37,10 +37,9 @@ runs:
         echo "REGISTRY=autoindexer${ID}.azurecr.io" >> $GITHUB_ENV
         echo "REGION=${{ env.REGION }}" >> $GITHUB_ENV
         echo "K8S_VERSION=${{ env.K8S_VERSION }}" >> $GITHUB_ENV
-      with:
-        env:
-          REGION: ${{ inputs.region }}
-          K8S_VERSION: ${{ inputs.k8s_version }}
+      env:
+        REGION: ${{ inputs.region }}
+        K8S_VERSION: ${{ inputs.k8s_version }}
 
     - name: Set up Go 1.24
       uses: actions/setup-go@v5.2.0
