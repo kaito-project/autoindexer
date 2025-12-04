@@ -116,6 +116,7 @@ runs:
     - name: Install gpu-provisioner
       shell: bash
       run: |
+        az aks get-credentials --name "${{ env.CLUSTER_NAME }}" --resource-group "${{ env.CLUSTER_NAME }}" --overwrite-existing
         # Download and configure Helm values
         curl -sO https://raw.githubusercontent.com/Azure/gpu-provisioner/main/hack/deploy/configure-helm-values.sh
         chmod +x ./configure-helm-values.sh && ./configure-helm-values.sh $CLUSTER_NAME $RESOURCE_GROUP $IDENTITY_NAME
@@ -137,6 +138,7 @@ runs:
     - name: Install KAITO RAGEngine helm chart
       shell: bash
       run: |
+        az aks get-credentials --name "${{ env.CLUSTER_NAME }}" --resource-group "${{ env.CLUSTER_NAME }}" --overwrite-existing
         helm repo add kaito https://kaito-project.github.io/kaito/charts/kaito
         helm repo update
         helm upgrade --install kaito-ragengine kaito/ragengine \
