@@ -36,10 +36,6 @@ runs:
         echo "CLUSTER_NAME=autoindexer${ID}" >> $GITHUB_ENV
         echo "REGISTRY=autoindexer${ID}.azurecr.io" >> $GITHUB_ENV
 
-    - name: Remove existing Go modules directory
-      shell: bash
-      run: sudo rm -rf ~/go/pkg/mod
-
     - name: Set up Go 1.24
       uses: actions/setup-go@v5.2.0
       with:
