@@ -9,7 +9,7 @@ const (
 	DefaultTestEmbeddingModelID  = "BAAI/bge-small-en-v1.5"
 	DefaultTestContextWindowSize = 16000
 	DefaultTestURL               = "http://test-inference.kaito-system.svc.cluster.local/v1/chat/completions"
-	DefaultCPUInstanceType       = "standard_d8_v4"
+	DefaultCPUInstanceType       = "Standard_D8_v4"
 )
 
 func CreateRAGEngineManifest(name, namespace, instanceType, embeddingModelID string, inferenceSpec *kaitov1alpha1.InferenceServiceSpec) *kaitov1alpha1.RAGEngine {
