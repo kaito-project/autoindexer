@@ -35,6 +35,12 @@ runs:
         echo "VERSION=${ID}" >> $GITHUB_ENV
         echo "CLUSTER_NAME=autoindexer${ID}" >> $GITHUB_ENV
         echo "REGISTRY=autoindexer${ID}.azurecr.io" >> $GITHUB_ENV
+        echo "REGION=${{ env.REGION }}" >> $GITHUB_ENV
+        echo "K8S_VERSION=${{ env.K8S_VERSION }}" >> $GITHUB_ENV
+      with:
+        env:
+          REGION: ${{ inputs.region }}
+          K8S_VERSION: ${{ inputs.k8s_version }}
 
     - name: Set up Go 1.24
       uses: actions/setup-go@v5.2.0
@@ -65,7 +71,7 @@ runs:
       uses: azure/CLI@v2.1.0
       with:
         inlineScript: |
-          az group create --name "${{ env.CLUSTER_NAME }}" --location "${{ inputs.region }}" -o none
+          az group create --name "${{ env.CLUSTER_NAME }}" --location "${{ env.REGION }}" -o none
     
     - name: Create ACR
       uses: azure/CLI@v2.1.0
@@ -85,8 +91,8 @@ runs:
       with:
         inlineScript: |
           az aks create  --name "${{ env.CLUSTER_NAME }}" --resource-group "${{ env.CLUSTER_NAME }}" \
-          --location "${{ inputs.region }}" --attach-acr "${{ env.CLUSTER_NAME }}" \
-          --kubernetes-version "${{ inputs.k8s_version }}" --generate-ssh-keys  \
+          --location "${{ env.REGION }}" --attach-acr "${{ env.CLUSTER_NAME }}" \
+          --kubernetes-version "${{ env.K8S_VERSION }}" --generate-ssh-keys  \
           --enable-managed-identity --enable-workload-identity --enable-oidc-issuer --node-vm-size Standard_D2d_v4 -o none
           az aks get-credentials --name "${{ env.CLUSTER_NAME }}" --resource-group "${{ env.CLUSTER_NAME }}" --overwrite-existing
 
