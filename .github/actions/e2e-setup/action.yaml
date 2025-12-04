@@ -81,12 +81,6 @@ runs:
       with:
         inlineScript: |
           az acr create --name "${{ env.CLUSTER_NAME }}" --resource-group "${{ env.CLUSTER_NAME }}" --sku Standard --admin-enabled -o none
-
-    - name: Create Azure Identity
-      uses: azure/CLI@v2.1.0
-      with:
-        inlineScript: |
-          az identity create --name "gpuprovisionerIdentity" --resource-group "${{ env.CLUSTER_NAME }}"
     
     - name: Create Cluster
       uses: azure/CLI@v2.1.0
@@ -98,42 +92,17 @@ runs:
           --enable-managed-identity --enable-workload-identity --enable-oidc-issuer --node-vm-size Standard_D2d_v4 -o none
           az aks get-credentials --name "${{ env.CLUSTER_NAME }}" --resource-group "${{ env.CLUSTER_NAME }}" --overwrite-existing
 
-    - name: Create Identity Federated Credential for gpuprovisioner
-      uses: azure/CLI@v2.1.0
+    - name: Create node pool for RAG workloads
+      uses: azure/CLI@v2.2.0
       with:
         inlineScript: |
-          AKS_OIDC_ISSUER=$(az aks show --name "${{ env.CLUSTER_NAME }}" --resource-group "${{ env.CLUSTER_NAME }}" --query "oidcIssuerProfile.issuerUrl" -o tsv)
-          az identity federated-credential create --name gpuprovisioner-fed \
-          --identity-name "gpuprovisionerIdentity" --resource-group "${{ env.CLUSTER_NAME }}" \
-          --issuer "${AKS_OIDC_ISSUER}" --audience api://AzureADTokenExchange \
-          --subject system:serviceaccount:gpu-provisioner:gpu-provisioner
-          IDENTITY_PRINCIPAL_ID=$(az identity show --name "gpuprovisionerIdentity" --resource-group "${{ env.CLUSTER_NAME }}" --query "principalId" -o tsv)
-          AZURE_RESOURCE_GROUP_RESOURCE_ID=$(az group show --name "${{ env.CLUSTER_NAME }}" --query "id" -o tsv)
-          az role assignment create --assignee "$IDENTITY_PRINCIPAL_ID" \
-          --scope "$AZURE_RESOURCE_GROUP_RESOURCE_ID" \
-          --role "Contributor"
-
-    - name: Install gpu-provisioner
-      shell: bash
-      run: |
-        az aks get-credentials --name "${{ env.CLUSTER_NAME }}" --resource-group "${{ env.CLUSTER_NAME }}" --overwrite-existing
-        # Download and configure Helm values
-        curl -sO https://raw.githubusercontent.com/Azure/gpu-provisioner/main/hack/deploy/configure-helm-values.sh
-        chmod +x ./configure-helm-values.sh && ./configure-helm-values.sh $CLUSTER_NAME $RESOURCE_GROUP $IDENTITY_NAME
-
-        # Install GPU provisioner
-        helm install gpu-provisioner \
-          --values gpu-provisioner-values.yaml \
-          --set settings.azure.clusterName=$CLUSTER_NAME \
-          --wait \
-          https://github.com/Azure/gpu-provisioner/raw/gh-pages/charts/gpu-provisioner-$GPU_PROVISIONER_VERSION.tgz \
-          --namespace gpu-provisioner \
-          --create-namespace
-      env:
-        GPU_PROVISIONER_VERSION: "0.3.6"
-        IDENTITY_NAME: "gpuprovisionerIdentity"
-        RESOURCE_GROUP: ${{ env.CLUSTER_NAME }}
-        CLUSTER_NAME: ${{ env.CLUSTER_NAME }}
+          az aks nodepool add \
+            --resource-group "${{ env.CLUSTER_NAME }}" \
+            --cluster-name "${{ env.CLUSTER_NAME }}" \
+            --name ragpool \
+            -s Standard_D8_v4 \
+            -c 1 \
+            --labels apps=autoindexer-rag
 
     - name: Install KAITO RAGEngine helm chart
       shell: bash

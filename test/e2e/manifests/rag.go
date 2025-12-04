@@ -21,7 +21,7 @@ func CreateRAGEngineManifest(name, namespace, instanceType, embeddingModelID str
 		Spec: &kaitov1alpha1.RAGEngineSpec{
 			Compute: &kaitov1alpha1.ResourceSpec{
 				InstanceType:  instanceType,
-				LabelSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"apps": name}},
+				LabelSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"apps": "autoindexer-rag"}},
 			},
 			Embedding: &kaitov1alpha1.EmbeddingSpec{
 				Local: &kaitov1alpha1.LocalEmbeddingSpec{
