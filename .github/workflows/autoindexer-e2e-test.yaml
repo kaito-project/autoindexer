@@ -15,6 +15,9 @@ on:
         description: "the kubernetes version for the aks cluster"
         required: false
         default: "1.28.6"
+  push:
+    branches:
+      - brfole/e2e
 
 env:
   GO_VERSION: "1.24"
