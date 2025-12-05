@@ -92,6 +92,29 @@ spec:
               dataSource:
                 description: DataSource defines where to retrieve documents for indexing
                 properties:
+                  database:
+                    description: Database defines configuration for database data
+                      sources (Kusto, SQL, etc.)
+                    properties:
+                      incrementalQuery:
+                        description: IncrementalQuery is the query to run on subsequent
+                          executions
+                        type: string
+                      initialQuery:
+                        description: |-
+                          InitialQuery is the complete query to run on first execution
+                          For Kusto: Must include cluster URL and database in the query
+                        type: string
+                      language:
+                        description: Language specifies the query language (e.g.,
+                          "Kusto" for Azure Data Explorer, "SQL" for SQL databases)
+                        enum:
+                        - Kusto
+                        type: string
+                    required:
+                    - initialQuery
+                    - language
+                    type: object
                   git:
                     description: Git defines configuration for Git repository data
                       sources
@@ -145,9 +168,11 @@ spec:
                     - enum:
                       - Git
                       - Static
+                      - Database
                     - enum:
                       - Git
                       - Static
+                      - Database
                     description: Type specifies the data source type
                     type: string
                 required:
@@ -156,8 +181,9 @@ spec:
               driftRemediationPolicy:
                 default:
                   strategy: Manual
-                description: DriftRemediationPolicy defines how to handle detected
-                  drift between expected and actual document counts
+                description: |-
+                  DriftRemediationPolicy defines how to handle detected drift between expected and actual document counts within the index.
+                  Drift detection is only performed for AutoIndexers with a Schedule defined.
                 properties:
                   strategy:
                     allOf:

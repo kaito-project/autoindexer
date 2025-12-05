@@ -223,6 +223,33 @@ func generateEnvironmentVariables(autoIndexer *v1alpha1.AutoIndexer) []corev1.En
 		}
 	}
 
+	// Add Azure Access Token for Database data source with Kusto language
+	if autoIndexer.Spec.DataSource.Type == v1alpha1.DataSourceTypeDatabase &&
+		autoIndexer.Spec.DataSource.Database != nil &&
+		autoIndexer.Spec.DataSource.Database.Language == "Kusto" {
+		// Check if there's a Secret for database credentials
+		// Convention: <autoindexer-name>-kusto-sp or use credentials.secretRef
+		secretName := fmt.Sprintf("%s-kusto-sp", autoIndexer.Name)
+		if autoIndexer.Spec.Credentials != nil && autoIndexer.Spec.Credentials.SecretRef != nil {
+			secretName = autoIndexer.Spec.Credentials.SecretRef.Name
+		}
+
+		envVars = append(envVars,
+			corev1.EnvVar{
+				Name: "AZURE_ACCESS_TOKEN",
+				ValueFrom: &corev1.EnvVarSource{
+					SecretKeyRef: &corev1.SecretKeySelector{
+						LocalObjectReference: corev1.LocalObjectReference{
+							Name: secretName,
+						},
+						Key:      "AZURE_ACCESS_TOKEN",
+						Optional: ptr.To(false), // Required for Kusto authentication
+					},
+				},
+			},
+		)
+	}
+
 	return envVars
 }
 
