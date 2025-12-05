@@ -1,0 +1,115 @@
+name: "e2e-setup"
+description: "Composite action for e2e setup"
+
+inputs:
+  git_sha:
+    description: "Git commit SHA"
+    required: true
+  region:
+    description: "the azure location to run the e2e test in"
+    required: false
+    default: "eastus"
+  k8s_version:
+    description: "the kubernetes version for the aks cluster"
+    required: false
+    default: "1.31.10"
+
+outputs:
+  cluster_name:
+    description: "Cluster name"
+  registry:
+    description: "Registry value"
+
+env:
+  GO_VERSION: "1.24"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Checkout
+      uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      with:
+        ref: ${{ inputs.git_sha }}
+
+    - name: Set e2e Resource and Cluster Name
+      shell: bash
+      run: |
+        ID="ri${{ github.run_id }}rn${{ github.run_number }}ra${{ github.run_attempt }}"
+
+        echo "VERSION=${ID}" >> $GITHUB_ENV
+        echo "CLUSTER_NAME=autoindexer${ID}" >> $GITHUB_ENV
+        echo "REGISTRY=autoindexer${ID}.azurecr.io" >> $GITHUB_ENV
+        echo "REGION=${{ env.REGION }}" >> $GITHUB_ENV
+        echo "K8S_VERSION=${{ env.K8S_VERSION }}" >> $GITHUB_ENV
+      env:
+        REGION: eastus
+        K8S_VERSION: ${{ inputs.k8s_version }}
+
+    - name: Set up Go 1.24
+      uses: actions/setup-go@v5.2.0
+      with:
+        go-version: "1.24"
+
+    - name: Install Azure CLI latest
+      shell: bash
+      run: |
+        if ! which az > /dev/null; then
+          echo "Azure CLI not found. Installing..."
+          curl -sL https://aka.ms/InstallAzureCLIDeb | sudo bash
+        else
+          echo "Azure CLI already installed."
+        fi
+
+    - name: Azure login
+      uses: azure/login@v2
+      with:
+        client-id: ${{ env.AZURE_CLIENT_ID }}
+        tenant-id: ${{ env.AZURE_TENANT_ID }}
+        subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
+
+    - name: Install Helm
+      uses: azure/setup-helm@v4
+    
+    - name: Create Resource Group
+      uses: azure/CLI@v2.1.0
+      with:
+        inlineScript: |
+          az group create --name "${{ env.CLUSTER_NAME }}" --location "${{ env.REGION }}" -o none
+    
+    - name: Create ACR
+      uses: azure/CLI@v2.1.0
+      with:
+        inlineScript: |
+          az acr create --name "${{ env.CLUSTER_NAME }}" --resource-group "${{ env.CLUSTER_NAME }}" --sku Standard --admin-enabled -o none
+    
+    - name: Create Cluster
+      uses: azure/CLI@v2.1.0
+      with:
+        inlineScript: |
+          az aks create  --name "${{ env.CLUSTER_NAME }}" --resource-group "${{ env.CLUSTER_NAME }}" \
+          --location "${{ env.REGION }}" --attach-acr "${{ env.CLUSTER_NAME }}" \
+          --kubernetes-version "${{ env.K8S_VERSION }}" --generate-ssh-keys --node-provisioning-mode Auto \
+          --enable-managed-identity --enable-workload-identity --enable-oidc-issuer --node-vm-size Standard_D2d_v4 -o none
+          az aks get-credentials --name "${{ env.CLUSTER_NAME }}" --resource-group "${{ env.CLUSTER_NAME }}" --overwrite-existing
+
+    - name: Create node pool for RAG workloads
+      uses: azure/CLI@v2.2.0
+      with:
+        inlineScript: |
+          az aks nodepool add \
+            --resource-group "${{ env.CLUSTER_NAME }}" \
+            --cluster-name "${{ env.CLUSTER_NAME }}" \
+            --name ragpool \
+            -s Standard_D8_v4 \
+            -c 1 \
+            --labels apps=autoindexer-rag
+
+    - name: Install KAITO RAGEngine helm chart
+      shell: bash
+      run: |
+        az aks get-credentials --name "${{ env.CLUSTER_NAME }}" --resource-group "${{ env.CLUSTER_NAME }}" --overwrite-existing
+        helm repo add kaito https://kaito-project.github.io/kaito/charts/kaito
+        helm repo update
+        helm upgrade --install kaito-ragengine kaito/ragengine \
+          --namespace kaito-ragengine \
+          --create-namespace
