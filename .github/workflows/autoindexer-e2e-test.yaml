@@ -1,4 +1,4 @@
-name: autoindexer-e2e-test
+name: E2E - AutoIndexer
 
 on:
   workflow_dispatch:
