@@ -1,6 +1,11 @@
 name: E2E - AutoIndexer
 
 on:
+  workflow_run:
+    workflows: [E2E - AutoIndexer PR Workflow]
+    types:
+      - in_progress
+
   workflow_dispatch:
     inputs:
       git_sha:
@@ -14,7 +19,7 @@ on:
       k8s_version:
         description: "the kubernetes version for the aks cluster"
         required: false
-        default: "1.31.10"
+        default: "1.32.0"
 
 permissions:
   id-token: write

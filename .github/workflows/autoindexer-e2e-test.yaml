@@ -1,9 +1,5 @@
 name: E2E - AutoIndexer PR Workflow
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
-  cancel-in-progress: true
-
 on:
   pull_request:
     branches:
@@ -23,13 +19,82 @@ permissions:
   contents: read # This is required for actions/checkout
 
 jobs:
-  run-e2e:
-    permissions:
-      contents: read
-      id-token: write
-      statuses: write
-    uses: ./.github/workflows/autoindexer-e2e-workflow.yaml
-    with:
-      git_sha: ${{ github.event.pull_request.head.sha }}
-      region: "eastus"
-      k8s_version: "1.31.10"
+  monitor-e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Collect run context
+        id: ctx
+        run: |
+          echo "pr_sha=${{ github.event.pull_request.head.sha }}" >> $GITHUB_OUTPUT
+          echo "start_time=$(date -u +"%Y-%m-%dT%H:%M:%SZ")" >> $GITHUB_OUTPUT
+
+      - name: Wait for E2E - AutoIndexer workflow to start
+        id: wait_start
+        run: |
+          echo "Waiting for E2E workflow to start..."
+          for i in {1..30}; do
+            runs=$(curl -s \
+              -H "Authorization: Bearer ${{ github.token }}" \
+              -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/repos/${{ github.repository }}/actions/runs?event=pull_request&status=in_progress")
+
+            run_id=$(echo "$runs" | jq -r \
+              '.workflow_runs[] 
+               | select(.name == "E2E - AutoIndexer") 
+               | select(.head_sha == "'${{ steps.ctx.outputs.pr_sha }}'") 
+               | .id')
+
+            if [ "$run_id" != "" ] && [ "$run_id" != "null" ]; then
+              echo "Found E2E workflow run: $run_id"
+              echo "e2e_run_id=$run_id" >> $GITHUB_OUTPUT
+              exit 0
+            fi
+
+            echo "Not found yet. Waiting..."
+            sleep 10
+          done
+
+          echo "Timed out waiting for E2E workflow to start"
+          exit 1
+
+      - name: Wait for E2E workflow to finish
+        id: wait_finish
+        run: |
+          run_id=${{ steps.wait_start.outputs.e2e_run_id }}
+
+          echo "Waiting for E2E workflow (run_id=$run_id) to complete..."
+          
+          for i in {1..60}; do
+            run=$(curl -s \
+              -H "Authorization: Bearer ${{ github.token }}" \
+              -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/repos/${{ github.repository }}/actions/runs/$run_id")
+
+            status=$(echo "$run" | jq -r '.status')
+            conclusion=$(echo "$run" | jq -r '.conclusion')
+
+            echo "Status: $status / Conclusion: $conclusion"
+
+            # If the child workflow is completed, exit loop
+            if [ "$status" == "completed" ]; then
+              echo "conclusion=$conclusion" >> $GITHUB_OUTPUT
+              exit 0
+            fi
+
+            sleep 10
+          done
+
+          echo "Timed out waiting for E2E workflow to finish"
+          exit 1
+
+      - name: Finalize monitor result
+        run: |
+          conclusion=${{ steps.wait_finish.outputs.conclusion }}
+
+          if [ "$conclusion" = "success" ]; then
+            echo "E2E workflow succeeded"
+            exit 0
+          else
+            echo "E2E workflow failed: $conclusion"
+            exit 1
+          fi
