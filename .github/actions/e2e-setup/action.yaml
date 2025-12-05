@@ -90,7 +90,6 @@ runs:
           --location "${{ env.REGION }}" --attach-acr "${{ env.CLUSTER_NAME }}" \
           --kubernetes-version "${{ env.K8S_VERSION }}" --generate-ssh-keys --node-provisioning-mode Auto \
           --enable-managed-identity --enable-workload-identity --enable-oidc-issuer --node-vm-size Standard_D2d_v4 -o none
-          az aks get-credentials --name "${{ env.CLUSTER_NAME }}" --resource-group "${{ env.CLUSTER_NAME }}" --overwrite-existing
 
     - name: Create node pool for RAG workloads
       uses: azure/CLI@v2.2.0
