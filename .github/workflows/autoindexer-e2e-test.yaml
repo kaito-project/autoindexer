@@ -1,4 +1,4 @@
-name: autoindexer-e2e-test
+name: E2E - AutoIndexer
 
 on:
   workflow_dispatch:
@@ -14,10 +14,20 @@ on:
       k8s_version:
         description: "the kubernetes version for the aks cluster"
         required: false
-        default: "1.31.10"
-  push:
+        default: "1.32.0"
+  pull_request_target:
+    types:
+      - opened
+      - synchronize
+      - reopened
     branches:
-      - brfole/e2e
+      - main
+    paths:
+      - 'test/**'
+      - 'pkg/**'
+      - 'cmd/**'
+      - '.github/**'
+      - 'jobs/**'
 
 env:
   GO_VERSION: "1.24"
