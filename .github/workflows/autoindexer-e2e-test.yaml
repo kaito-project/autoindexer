@@ -15,12 +15,22 @@ on:
         description: "the kubernetes version for the aks cluster"
         required: false
         default: "1.31.10"
-  push:
+
+  pull_request:
     branches:
-      - brfole/e2e
+      - main
+    paths:
+      - 'test/**'
+      - 'pkg/**'
+      - 'cmd/**'
+      - '.github/**'
+      - 'jobs/**'
 
 env:
   GO_VERSION: "1.24"
+  git_sha: ${{ inputs.git_sha || github.sha }}
+  region: ${{ inputs.region || 'eastus' }}
+  k8s_version: ${{ inputs.k8s_version || '1.31.10' }}
 
 permissions:
   id-token: write # This is required for requesting the JWT
