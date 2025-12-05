@@ -50,15 +50,15 @@ jobs:
       - name: Checkout
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
-          ref: ${{ inputs.git_sha }}
+          ref: ${{ env.git_sha }}
 
       - name: Run e2e-base-setup composite action
         id: base-setup
         uses: ./.github/actions/e2e-setup
         with:
-          git_sha: ${{ inputs.git_sha }}
-          region: ${{ inputs.region }}
-          k8s_version: ${{ inputs.k8s_version }}
+          git_sha: ${{ env.git_sha }}
+          region: ${{ env.region }}
+          k8s_version: ${{ env.k8s_version }}
         env:
           AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
           AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
@@ -91,6 +91,8 @@ jobs:
         uses: actions/setup-go@v5.5.0
         with:
           go-version: ${{ env.GO_VERSION }}
+        env:
+          GO_VERSION: ${{ env.GO_VERSION }}
       
       - name: Install Helm
         uses: azure/setup-helm@v4
