@@ -44,13 +44,16 @@ jobs:
       - name: Checkout
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
-          ref: ${{ env.git_sha }}
+          repository: ${{ github.event.workflow_run.head_repository.full_name }}
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 0
 
       - name: Run e2e-base-setup composite action
         id: base-setup
         uses: ./.github/actions/e2e-setup
         with:
           git_sha: ${{ env.git_sha }}
+          git_repository: ${{ github.event.workflow_run.head_repository.full_name }}
           region: ${{ env.region }}
           k8s_version: ${{ env.k8s_version }}
         env:

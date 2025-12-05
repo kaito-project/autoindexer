@@ -5,6 +5,9 @@ inputs:
   git_sha:
     description: "Git commit SHA"
     required: true
+  git_repository:
+    description: "Git repository"
+    required: true
   region:
     description: "the azure location to run the e2e test in"
     required: false
