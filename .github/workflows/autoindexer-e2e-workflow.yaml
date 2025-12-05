@@ -1,0 +1,104 @@
+name: E2E - AutoIndexer
+
+on:
+  workflow_dispatch:
+    inputs:
+      git_sha:
+        description: "Git commit SHA"
+        required: true
+        default: "main"
+      region:
+        description: "the azure location to run the e2e test in"
+        required: false
+        default: "eastus"
+      k8s_version:
+        description: "the kubernetes version for the aks cluster"
+        required: false
+        default: "1.31.10"
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  e2e-tests:
+    runs-on: ubuntu-latest
+    environment: e2e-test
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@f4a75cfd619ee5ce8d5b864b0d183aff3c69b55a # v2.13.1
+        with:
+          egress-policy: audit
+          disable-sudo: true
+          disable-telemetry: true
+
+      - name: Checkout
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          ref: ${{ env.git_sha }}
+
+      - name: Run e2e-base-setup composite action
+        id: base-setup
+        uses: ./.github/actions/e2e-setup
+        with:
+          git_sha: ${{ env.git_sha }}
+          region: ${{ env.region }}
+          k8s_version: ${{ env.k8s_version }}
+        env:
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      
+      - name: Azure login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      
+      - name: Build AutoIndexer Controller Image
+        shell: bash
+        run: |
+          az acr login --name ${{ env.REGISTRY }}
+          make docker-build-autoindexer
+        env:
+          REGISTRY: ${{ env.CLUSTER_NAME }}.azurecr.io
+      
+      - name: Build AutoIndexer Job Image
+        shell: bash
+        run: |
+          az acr login --name ${{ env.REGISTRY }}
+          make docker-build-autoindexer-job
+        env:
+          REGISTRY: ${{ env.CLUSTER_NAME }}.azurecr.io
+      
+      - name: Set up Go ${{ env.GO_VERSION }}
+        uses: actions/setup-go@v5.5.0
+        with:
+          go-version: ${{ env.GO_VERSION }}
+        env:
+          GO_VERSION: ${{ env.GO_VERSION }}
+      
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+      
+      - name: Install AutoIndexer helm chart
+        shell: bash
+        run: |
+          make az-patch-install-autoindexer-helm-e2e
+          kubectl wait --for=condition=available deploy "kaito-autoindexer" -n kaito-autoindexer --timeout=300s
+        env:
+          REGISTRY: ${{ env.CLUSTER_NAME }}.azurecr.io
+          AZURE_RESOURCE_GROUP: ${{ env.CLUSTER_NAME }}
+          AZURE_CLUSTER_NAME: ${{ env.CLUSTER_NAME }}
+      
+      - name: Run e2e test
+        run: |
+          az aks get-credentials --name "${{ env.CLUSTER_NAME }}" --resource-group "${{ env.CLUSTER_NAME }}" --overwrite-existing
+          make autoindexer-e2e-test
+        env:
+          CLUSTER_NAME: ${{ env.CLUSTER_NAME }}
