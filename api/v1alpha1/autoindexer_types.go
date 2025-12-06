@@ -80,7 +80,7 @@ type AutoIndexerSpec struct {
 type DataSourceSpec struct {
 	// Type specifies the data source type
 	// +kubebuilder:validation:Required
-	// +kubebuilder:validation:Enum=Git;Static
+	// +kubebuilder:validation:Enum=Git;Static;Database
 	Type DataSourceType `json:"type"`
 
 	// Git defines configuration for Git repository data sources
@@ -90,15 +90,20 @@ type DataSourceSpec struct {
 	// Static defines configuration for static data sources
 	// +optional
 	Static *StaticDataSourceSpec `json:"static,omitempty"`
+
+	// Database defines configuration for database data sources (Kusto, SQL, etc.)
+	// +optional
+	Database *DatabaseDataSourceSpec `json:"database,omitempty"`
 }
 
 // DataSourceType defines the supported data source types
-// +kubebuilder:validation:Enum=Git;Static
+// +kubebuilder:validation:Enum=Git;Static;Database
 type DataSourceType string
 
 const (
-	DataSourceTypeGit    DataSourceType = "Git"
-	DataSourceTypeStatic DataSourceType = "Static"
+	DataSourceTypeGit      DataSourceType = "Git"
+	DataSourceTypeStatic   DataSourceType = "Static"
+	DataSourceTypeDatabase DataSourceType = "Database"
 )
 
 // GitDataSourceSpec defines Git repository configuration
@@ -160,6 +165,31 @@ const (
 	// The drift detector will skip checking the AutoIndexer for drift, and the AutoIndexer will continue normal operation.
 	DriftRemediationStrategyIgnore DriftRemediationStrategy = "Ignore" // Ignore drift
 )
+
+// DatabaseLanguage defines the supported database query languages
+// +kubebuilder:validation:Enum=Kusto
+type DatabaseLanguage string
+
+const (
+	// DatabaseLanguageKusto represents Azure Data Explorer (Kusto Query Language)
+	DatabaseLanguageKusto DatabaseLanguage = "Kusto"
+)
+
+// DatabaseDataSourceSpec defines database data source configuration
+type DatabaseDataSourceSpec struct {
+	// Language specifies the query language
+	// +kubebuilder:validation:Required
+	Language DatabaseLanguage `json:"language"`
+
+	// InitialQuery is the complete query to run on first execution
+	// For Kusto: Must include cluster URL and database in the query
+	// +kubebuilder:validation:Required
+	InitialQuery string `json:"initialQuery"`
+
+	// IncrementalQuery is the query to run on subsequent executions
+	// +optional
+	IncrementalQuery string `json:"incrementalQuery,omitempty"`
+}
 
 // CredentialsSpec defines authentication credentials
 type CredentialsSpec struct {

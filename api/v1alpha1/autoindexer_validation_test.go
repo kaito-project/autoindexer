@@ -36,7 +36,7 @@ func TestDriftRemediationPolicy_Validation(t *testing.T) {
 			description: "Auto strategy should be valid",
 		},
 		{
-			name: "valid Manual strategy", 
+			name: "valid Manual strategy",
 			policy: &DriftRemediationPolicy{
 				Strategy: DriftRemediationStrategyManual,
 			},
@@ -181,9 +181,9 @@ func TestDriftRemediationPolicy_ValidateFunction(t *testing.T) {
 }
 
 func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || (len(s) > len(substr) && 
-		(s[:len(substr)] == substr || s[len(s)-len(substr):] == substr || 
-		 indexOf(s, substr) >= 0)))
+	return len(s) >= len(substr) && (s == substr || (len(s) > len(substr) &&
+		(s[:len(substr)] == substr || s[len(s)-len(substr):] == substr ||
+			indexOf(s, substr) >= 0)))
 }
 
 func indexOf(s, substr string) int {
@@ -389,6 +389,73 @@ func TestAutoIndexer_Validate(t *testing.T) {
 			}
 			if !tc.wantErr && err != nil {
 				t.Errorf("unexpected error: %v", err)
+			}
+		})
+	}
+}
+
+func TestDatabaseDataSourceSpec_Validation(t *testing.T) {
+	testCases := []struct {
+		name        string
+		autoIndexer *AutoIndexer
+		wantErr     bool
+		description string
+	}{
+		{
+			name: "valid Database data source with both queries",
+			autoIndexer: &AutoIndexer{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test",
+					Namespace: "default",
+				},
+				Spec: AutoIndexerSpec{
+					RAGEngine: "test-ragengine",
+					IndexName: "test-index",
+					DataSource: DataSourceSpec{
+						Type: DataSourceTypeDatabase,
+						Database: &DatabaseDataSourceSpec{
+							Language:         "Kusto",
+							InitialQuery:     "cluster('https://fake.kusto.windows.net').database('TestDB') | take 10",
+							IncrementalQuery: "cluster('https://fake.kusto.windows.net').database('TestDB') | where timestamp > datetime($LAST_INDEXING_TIMESTAMP)",
+						},
+					},
+				},
+			},
+			wantErr:     false,
+			description: "Valid Database data source with proper queries should pass validation",
+		},
+		{
+			name: "Database data source missing initialQuery",
+			autoIndexer: &AutoIndexer{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test",
+					Namespace: "default",
+				},
+				Spec: AutoIndexerSpec{
+					RAGEngine: "test-ragengine",
+					IndexName: "test-index",
+					DataSource: DataSourceSpec{
+						Type: DataSourceTypeDatabase,
+						Database: &DatabaseDataSourceSpec{
+							Language:         "Kusto",
+							IncrementalQuery: "cluster('https://fake.kusto.windows.net').database('TestDB') | where timestamp > datetime($LAST_INDEXING_TIMESTAMP)",
+						},
+					},
+				},
+			},
+			wantErr:     true,
+			description: "Database data source missing initialQuery should fail validation",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.autoIndexer.Validate(context.Background())
+			if tc.wantErr && err == nil {
+				t.Errorf("expected error for: %s, got nil", tc.description)
+			}
+			if !tc.wantErr && err != nil {
+				t.Errorf("unexpected error for: %s, got %v", tc.description, err)
 			}
 		})
 	}

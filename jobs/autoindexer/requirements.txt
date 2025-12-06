@@ -7,6 +7,9 @@ kubernetes>=28.1.0
 pyyaml>=6.0.0
 kaito-rag-engine-client>=0.7.0
 
+# Azure Kusto
+azure-kusto-data>=4.3.1
+
 # Git handling
 GitPython>=3.1.31
 gitdb>=4.0.0

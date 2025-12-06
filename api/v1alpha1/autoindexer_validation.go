@@ -108,6 +108,11 @@ func (ds *DataSourceSpec) validate() *apis.FieldError {
 			return apis.ErrMissingField("static")
 		}
 		return ds.Static.validate()
+	case "Database":
+		if ds.Database == nil {
+			return apis.ErrMissingField("database")
+		}
+		return ds.Database.validate()
 	default:
 		return apis.ErrInvalidValue(ds.Type, "type")
 	}
@@ -187,6 +192,17 @@ func (s *StaticDataSourceSpec) validate() *apis.FieldError {
 
 }
 
+func (d *DatabaseDataSourceSpec) validate() *apis.FieldError {
+	if d.Language == "" {
+		return apis.ErrMissingField("language")
+	}
+	if d.InitialQuery == "" {
+		return apis.ErrMissingField("initialQuery")
+	}
+
+	return nil
+}
+
 func (a *AutoIndexerSpec) validateUpdate(old AutoIndexerSpec) (errs *apis.FieldError) {
 	return nil
 }
@@ -195,7 +211,7 @@ func (d *DriftRemediationPolicy) validate() *apis.FieldError {
 	if d == nil {
 		return nil
 	}
-	
+
 	// Validate that the strategy is one of the allowed values
 	switch d.Strategy {
 	case DriftRemediationStrategyAuto, DriftRemediationStrategyManual, DriftRemediationStrategyIgnore:

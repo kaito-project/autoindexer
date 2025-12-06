@@ -128,6 +128,16 @@ class AutoIndexerJob:
                 autoindexer_client=self.autoindexer_client,
                 credentials=self.access_secret
             )
+        elif self.datasource_type.lower() == "database":
+            # Database type with KQL language support (formerly Kusto)
+            from autoindexer.data_source_handler.kusto_handler import KustoDataSourceHandler
+            return KustoDataSourceHandler(
+                index_name=self.index_name,
+                config=self.datasource_config or {},
+                rag_client=self.rag_client,
+                autoindexer_client=self.autoindexer_client,
+                credentials=self.access_secret
+            )
         else:
             raise ValueError(f"Unsupported data source type: {self.datasource_type}")
 
@@ -193,6 +203,16 @@ class AutoIndexerJob:
                         "urls": static_config.get("urls", [])
                     })
                     logger.info("Updated Static data source configuration from CRD")
+                
+                elif ds_config.get("database") and ds_config["type"] == "Database":
+                    database_config = ds_config["database"]
+                    self.datasource_config.update({
+                        "autoindexer_name": autoindexer_full_name,
+                        "language": database_config.get("language"),
+                        "initialQuery": database_config.get("initialQuery"),
+                        "incrementalQuery": database_config.get("incrementalQuery"),
+                    })
+                    logger.info(f"Updated Database data source configuration from CRD (language: {database_config.get('language')})")
                 
                 else:
                     raise ValueError("Unsupported or missing data source configuration in CRD")
