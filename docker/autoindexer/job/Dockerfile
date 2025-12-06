@@ -9,14 +9,8 @@ RUN apt-get update && apt-get upgrade -y \
     make \
     perl \
     git \
-    curl \
-    gnupg \
-    lsb-release \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
-
-# Install Azure CLI (for device code authentication)
-RUN curl -sL https://aka.ms/InstallAzureCLIDeb | bash
 
 FROM dependencies AS base
 

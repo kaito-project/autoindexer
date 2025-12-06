@@ -166,12 +166,20 @@ const (
 	DriftRemediationStrategyIgnore DriftRemediationStrategy = "Ignore" // Ignore drift
 )
 
+// DatabaseLanguage defines the supported database query languages
+// +kubebuilder:validation:Enum=Kusto
+type DatabaseLanguage string
+
+const (
+	// DatabaseLanguageKusto represents Azure Data Explorer (Kusto Query Language)
+	DatabaseLanguageKusto DatabaseLanguage = "Kusto"
+)
+
 // DatabaseDataSourceSpec defines database data source configuration
 type DatabaseDataSourceSpec struct {
-	// Language specifies the query language (e.g., "Kusto" for Azure Data Explorer, "SQL" for SQL databases)
+	// Language specifies the query language
 	// +kubebuilder:validation:Required
-	// +kubebuilder:validation:Enum=Kusto
-	Language string `json:"language"`
+	Language DatabaseLanguage `json:"language"`
 
 	// InitialQuery is the complete query to run on first execution
 	// For Kusto: Must include cluster URL and database in the query
