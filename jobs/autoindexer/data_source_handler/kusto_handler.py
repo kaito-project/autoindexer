@@ -220,45 +220,16 @@ class KustoDataSourceHandler(DataSourceHandler):
         """
         Format Kusto records into Document objects for indexing.
         
-        The formatting is flexible and adapts to whatever columns are in the query results.
-        Metadata only contains identification/classification info, not the actual data content.
+        Following the same pattern as git_handler and static_handler:
+        - Metadata: Only identification/classification info (autoindexer, source_type, timestamp)
+        - Text: All record data as "key: value" format
         """
         documents = []
         
         for record in records:
             try:
-                # Build text content from all available columns
+                # Build text content from ALL columns
                 text_parts = []
-                
-                # Metadata: only identification and classification info (following git_handler pattern)
-                metadata = {
-                    "autoindexer": self.autoindexer_name,
-                    "source_type": "kusto"
-                }
-                
-                # Extract common identification fields for metadata if present
-                # These are short fields used for filtering/classification
-                id_fields = ["id", "Id", "ID", "IncidentId", "incident_id", "objectRef"]
-                for field in id_fields:
-                    if field in record and record[field]:
-                        metadata["record_id"] = str(record[field])
-                        break
-                
-                # Extract timestamp for metadata if present
-                timestamp_cols = ["TIMESTAMP", "timestamp", "Timestamp", "logPreciseTime", "CreatedDateTime", "created_at"]
-                for col in timestamp_cols:
-                    if col in record and record[col]:
-                        metadata["timestamp"] = str(record[col])
-                        break
-                
-                # Extract state/status for metadata if present (for filtering)
-                status_fields = ["State", "state", "Status", "status"]
-                for field in status_fields:
-                    if field in record and record[field]:
-                        metadata["status"] = str(record[field])
-                        break
-                
-                # Build text content from ALL columns (this is what gets searched)
                 for key, value in record.items():
                     if value is not None and str(value).strip():
                         text_parts.append(f"{key}: {value}")
@@ -267,9 +238,15 @@ class KustoDataSourceHandler(DataSourceHandler):
                     logger.warning("Skipping record with no content")
                     continue
                 
+                # Metadata: only core identification fields (following git_handler/static_handler pattern)
+                metadata = {
+                    "autoindexer": self.autoindexer_name,
+                    "source_type": "kusto",
+                    "timestamp": self._get_current_timestamp()
+                }
+                
                 # Create document
                 text_content = "\n".join(text_parts)
-                
                 doc = Document(
                     text=text_content,
                     metadata=metadata
@@ -282,6 +259,10 @@ class KustoDataSourceHandler(DataSourceHandler):
         
         logger.info(f"✓ Formatted {len(documents)} documents from {len(records)} records")
         return documents
+    
+    def _get_current_timestamp(self) -> str:
+        """Get current timestamp in ISO format."""
+        return datetime.now(UTC).isoformat().replace('+00:00', 'Z')
 
     def update_index(self) -> list[str]:
         """
@@ -374,5 +355,5 @@ class KustoDataSourceHandler(DataSourceHandler):
             indexing_duration_seconds=duration_seconds
         )
 
-        if not self.autoindexer_client.update_autoindexer_status(status_update, update_success_or_failure=True):
+        if not self.autoindexer_client.update_autoindexer_status(status_update):
             logger.error("Failed to update AutoIndexer status")
