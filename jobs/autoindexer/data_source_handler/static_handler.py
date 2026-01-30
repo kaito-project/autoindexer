@@ -197,7 +197,7 @@ class StaticDataSourceHandler(DataSourceHandler):
             # Add authentication if available
             if self.credentials:
                 # Static Data Source Handler should only be able to use token without scopes (secret credentials)
-                token = self.credentials.get_token(scopes="")
+                token = self.credentials.get_token()
                 headers['Authorization'] = f'Bearer {token}'
             
             # Make request with timeout and streaming for large files

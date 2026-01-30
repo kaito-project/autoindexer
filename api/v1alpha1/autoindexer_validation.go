@@ -214,21 +214,45 @@ func (c *CredentialsSpec) validate() *apis.FieldError {
 			return apis.ErrMissingField("secretRef")
 		}
 	case CredentialTypeWorkloadIdentity:
-		if c.WorkloadIdentityRef == nil || c.WorkloadIdentityRef.ServiceAccountName == "" || c.WorkloadIdentityRef.ClientID == "" {
+		if c.WorkloadIdentityRef == nil {
 			return apis.ErrMissingField("workloadIdentityRef")
 		}
-
-		if _, err := uuid.Parse(c.WorkloadIdentityRef.ClientID); err != nil {
-			return apis.ErrInvalidValue(c.WorkloadIdentityRef.ClientID, "workloadIdentityRef.clientID")
+		if c.WorkloadIdentityRef.CloudProvider == "" {
+			return apis.ErrMissingField("cloudProvider")
 		}
 
-		if c.WorkloadIdentityRef.TenantID != nil {
-			if _, err := uuid.Parse(*c.WorkloadIdentityRef.TenantID); err != nil {
-				return apis.ErrInvalidValue(*c.WorkloadIdentityRef.TenantID, "workloadIdentityRef.tenantID")
-			}
+		switch c.WorkloadIdentityRef.CloudProvider {
+		case CloudProviderAzure:
+			return c.WorkloadIdentityRef.AzureWorkloadIdentityRef.validate()
+		default:
+			return apis.ErrInvalidValue(string(c.WorkloadIdentityRef.CloudProvider), "cloudProvider")
 		}
 	default:
 		return apis.ErrInvalidValue(string(c.Type), "type")
+	}
+	return nil
+}
+
+func (az *AzureWorkloadIdentityRef) validate() *apis.FieldError {
+	if az == nil {
+		return apis.ErrMissingField("")
+	}
+	if az.ClientID == "" {
+		return apis.ErrMissingField("clientID")
+	}
+	if az.ServiceAccountName == "" {
+		return apis.ErrMissingField("serviceAccountName")
+	}
+	if az.Scope == "" {
+		return apis.ErrMissingField("scope")
+	}
+	if _, err := uuid.Parse(az.ClientID); err != nil {
+		return apis.ErrInvalidValue(az.ClientID, "clientID")
+	}
+	if az.TenantID != nil {
+		if _, err := uuid.Parse(*az.TenantID); err != nil {
+			return apis.ErrInvalidValue(*az.TenantID, "tenantID")
+		}
 	}
 	return nil
 }

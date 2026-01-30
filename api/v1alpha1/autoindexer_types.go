@@ -227,11 +227,34 @@ type SecretKeyRef struct {
 	Key string `json:"key"`
 }
 
+// CloudProvder defines the supported cloud providers for workload identity
+// +kubebuilder:validation:Enum=Azure
+type CloudProvder string
+
+const (
+	CloudProviderAzure CloudProvder = "Azure"
+)
+
 // WorkloadIdentityRef references a workload identity configuration
 type WorkloadIdentityRef struct {
+	// CloudProvider specifies the cloud provider for the workload identity
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:Enum=Azure
+	CloudProvider CloudProvder `json:"cloudProvider"`
+
+	// AzureWorkloadIdentityRef contains Azure-specific workload identity details
+	// +optional
+	AzureWorkloadIdentityRef *AzureWorkloadIdentityRef `json:"azureWorkloadIdentityRef,omitempty"`
+}
+
+type AzureWorkloadIdentityRef struct {
 	// ServiceAccountName associated with the workload identity
 	// +kubebuilder:validation:Required
 	ServiceAccountName string `json:"serviceAccountName"`
+
+	// Scope of the workload identity
+	// +kubebuilder:validation:Required
+	Scope string `json:"scope"`
 
 	// ClientID of the workload identity
 	// +kubebuilder:validation:Required

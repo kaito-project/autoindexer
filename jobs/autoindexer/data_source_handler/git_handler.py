@@ -155,7 +155,7 @@ class GitDataSourceHandler(DataSourceHandler):
             clone_url = self.repository
             if self.credentials and "https://" in clone_url:
                 # Get token from credential provider (for Git, we typically use default scope)
-                token = self.credentials.get_token(scopes="https://dev.azure.com/.default")
+                token = self.credentials.get_token()
                 # Insert credentials into HTTPS URL
                 clone_url = clone_url.replace("https://", f"https://{token}@")
             

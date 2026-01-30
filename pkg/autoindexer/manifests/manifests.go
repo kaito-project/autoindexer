@@ -208,7 +208,8 @@ func generateEnvironmentVariables(autoIndexer *v1alpha1.AutoIndexer) []corev1.En
 
 	// Add credentials configuration if present
 	if autoIndexer.Spec.Credentials != nil {
-		if autoIndexer.Spec.Credentials.Type == v1alpha1.CredentialTypeSecretRef {
+		switch autoIndexer.Spec.Credentials.Type {
+		case v1alpha1.CredentialTypeSecretRef:
 			envVars = append(envVars, corev1.EnvVar{
 				Name: EnvAccessSecret,
 				ValueFrom: &corev1.EnvVarSource{
@@ -220,30 +221,33 @@ func generateEnvironmentVariables(autoIndexer *v1alpha1.AutoIndexer) []corev1.En
 					},
 				},
 			})
-		} else if autoIndexer.Spec.Credentials.Type == v1alpha1.CredentialTypeWorkloadIdentity {
+		case v1alpha1.CredentialTypeWorkloadIdentity:
 			// Add Azure Workload Identity environment variables
 			// These are automatically populated by the Azure Workload Identity webhook
 			// when the service account has the appropriate labels/annotations
 			if autoIndexer.Spec.Credentials.WorkloadIdentityRef != nil {
-				if autoIndexer.Spec.Credentials.WorkloadIdentityRef.ClientID != "" {
-					envVars = append(envVars, corev1.EnvVar{
-						Name:  "AZURE_CLIENT_ID",
-						Value: autoIndexer.Spec.Credentials.WorkloadIdentityRef.ClientID,
-					})
-				}
-				if autoIndexer.Spec.Credentials.WorkloadIdentityRef.TenantID != nil {
-					envVars = append(envVars, corev1.EnvVar{
-						Name:  "AZURE_TENANT_ID",
-						Value: *autoIndexer.Spec.Credentials.WorkloadIdentityRef.TenantID,
-					})
+				switch autoIndexer.Spec.Credentials.WorkloadIdentityRef.CloudProvider {
+				case v1alpha1.CloudProviderAzure:
+					if autoIndexer.Spec.Credentials.WorkloadIdentityRef.AzureWorkloadIdentityRef.ClientID != "" {
+						envVars = append(envVars, corev1.EnvVar{
+							Name:  "AZURE_CLIENT_ID",
+							Value: autoIndexer.Spec.Credentials.WorkloadIdentityRef.AzureWorkloadIdentityRef.ClientID,
+						})
+					}
+					if autoIndexer.Spec.Credentials.WorkloadIdentityRef.AzureWorkloadIdentityRef.TenantID != nil {
+						envVars = append(envVars, corev1.EnvVar{
+							Name:  "AZURE_TENANT_ID",
+							Value: *autoIndexer.Spec.Credentials.WorkloadIdentityRef.AzureWorkloadIdentityRef.TenantID,
+						})
+					}
+					if autoIndexer.Spec.Credentials.WorkloadIdentityRef.AzureWorkloadIdentityRef.Scope != "" {
+						envVars = append(envVars, corev1.EnvVar{
+							Name:  "AZURE_TOKEN_SCOPE",
+							Value: autoIndexer.Spec.Credentials.WorkloadIdentityRef.AzureWorkloadIdentityRef.Scope,
+						})
+					}
 				}
 			}
-			// AZURE_FEDERATED_TOKEN_FILE is typically injected by the workload identity webhook
-			// but we can set it explicitly if needed
-			envVars = append(envVars, corev1.EnvVar{
-				Name:  "AZURE_FEDERATED_TOKEN_FILE",
-				Value: "/var/run/secrets/azure/tokens/azure-identity-token",
-			})
 		}
 	}
 
@@ -341,7 +345,14 @@ func GenerateJobName(autoIndexer *v1alpha1.AutoIndexer, jobType string) string {
 // GenerateServiceAccountName creates a unique service account name for the AutoIndexer
 func GenerateServiceAccountName(autoIndexer *v1alpha1.AutoIndexer) string {
 	if autoIndexer != nil && autoIndexer.Spec.Credentials != nil && autoIndexer.Spec.Credentials.Type == v1alpha1.CredentialTypeWorkloadIdentity {
-		return autoIndexer.Spec.Credentials.WorkloadIdentityRef.ServiceAccountName
+		if autoIndexer.Spec.Credentials.WorkloadIdentityRef != nil {
+			switch autoIndexer.Spec.Credentials.WorkloadIdentityRef.CloudProvider {
+			case v1alpha1.CloudProviderAzure:
+				if autoIndexer.Spec.Credentials.WorkloadIdentityRef.AzureWorkloadIdentityRef != nil && autoIndexer.Spec.Credentials.WorkloadIdentityRef.AzureWorkloadIdentityRef.ServiceAccountName != "" {
+					return fmt.Sprintf("%s-azure-wi-sa", autoIndexer.Name)
+				}
+			}
+		}
 	}
 	return fmt.Sprintf("%s-job-sa", autoIndexer.Name)
 }
@@ -407,12 +418,17 @@ func GenerateServiceAccountManifest(autoIndexer *v1alpha1.AutoIndexer) *corev1.S
 		},
 	}
 
-	if autoIndexer.Spec.Credentials != nil && autoIndexer.Spec.Credentials.Type == v1alpha1.CredentialTypeWorkloadIdentity {
-		sa.Annotations = map[string]string{
-			"azure.workload.identity/client-id": autoIndexer.Spec.Credentials.WorkloadIdentityRef.ClientID,
-		}
-		if autoIndexer.Spec.Credentials.WorkloadIdentityRef.TenantID != nil {
-			sa.Annotations["azure.workload.identity/tenant-id"] = *autoIndexer.Spec.Credentials.WorkloadIdentityRef.TenantID
+	if autoIndexer.Spec.Credentials != nil && autoIndexer.Spec.Credentials.Type == v1alpha1.CredentialTypeWorkloadIdentity && autoIndexer.Spec.Credentials.WorkloadIdentityRef != nil {
+		switch autoIndexer.Spec.Credentials.WorkloadIdentityRef.CloudProvider {
+		case v1alpha1.CloudProviderAzure:
+			if autoIndexer.Spec.Credentials.WorkloadIdentityRef.AzureWorkloadIdentityRef != nil {
+				sa.Annotations = map[string]string{
+					"azure.workload.identity/client-id": autoIndexer.Spec.Credentials.WorkloadIdentityRef.AzureWorkloadIdentityRef.ClientID,
+				}
+				if autoIndexer.Spec.Credentials.WorkloadIdentityRef.AzureWorkloadIdentityRef.TenantID != nil {
+					sa.Annotations["azure.workload.identity/tenant-id"] = *autoIndexer.Spec.Credentials.WorkloadIdentityRef.AzureWorkloadIdentityRef.TenantID
+				}
+			}
 		}
 	}
 

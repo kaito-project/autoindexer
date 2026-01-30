@@ -29,14 +29,12 @@ class AzureWorkloadIdentityProvider(CredentialProvider):
         self.client_id = client_id or os.getenv("AZURE_CLIENT_ID")
         self.tenant_id = tenant_id or os.getenv("AZURE_TENANT_ID")
         self.token_file_path = token_file_path or os.getenv("AZURE_FEDERATED_TOKEN_FILE")
+        self.token_scopes = os.getenv("AZURE_TOKEN_SCOPE")
         self.credential = None
 
-    def get_token(self, scopes: str = None) -> str:
+    def get_token(self) -> str:
         """
         Retrieve a token for authentication using Azure Workload Identity.
-
-        Args:
-            scopes: The OAuth 2.0 scopes to request the token for. If not provided, defaults to the instance's scopes.
 
         Returns:
             str: A token string for authentication
@@ -53,7 +51,7 @@ class AzureWorkloadIdentityProvider(CredentialProvider):
                 )
             
             # Get the access token
-            token = self.credential.get_token(scopes=scopes)
+            token = self.credential.get_token(scopes=self.token_scopes)
             
             logger.info("Successfully retrieved Azure AD token")
             return token.token

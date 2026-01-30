@@ -154,12 +154,11 @@ class KustoDataSourceHandler(DataSourceHandler):
         if len(all_clusters) > 1:
             logger.info(f"Cross-cluster query detected. Additional clusters: {all_clusters[1:]}")
 
-        all_clusters_as_scopes = " ".join([f"https://{cluster_url.replace("https://", "").replace("http://", "")}.kusto.windows.net/.default" for cluster_url in all_clusters])
         # Get access token
         if not self.credentials:
             raise DataSourceError("Credentials are required for Kusto authentication")
         
-        access_token = self.credentials.get_token(scopes=all_clusters_as_scopes)
+        access_token = self.credentials.get_token()
         if not access_token:
             raise DataSourceError("Failed to retrieve access token for Kusto authentication")
         

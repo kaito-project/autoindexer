@@ -74,9 +74,13 @@ func createTestAutoIndexerWithWorkloadIdentity(name, namespace string, serviceAc
 			Credentials: &v1alpha1.CredentialsSpec{
 				Type: v1alpha1.CredentialTypeWorkloadIdentity,
 				WorkloadIdentityRef: &v1alpha1.WorkloadIdentityRef{
-					ServiceAccountName: serviceAccountName,
-					ClientID:           clientID,
-					TenantID:           tenantID,
+					CloudProvider: v1alpha1.CloudProviderAzure,
+					AzureWorkloadIdentityRef: &v1alpha1.AzureWorkloadIdentityRef{
+						ServiceAccountName: serviceAccountName,
+						ClientID:           clientID,
+						Scope:              "https://storage.azure.com/.default",
+						TenantID:           tenantID,
+					},
 				},
 			},
 		},
@@ -184,8 +188,9 @@ func TestGenerateIndexingJobManifestWithWorkloadIdentity(t *testing.T) {
 	job := GenerateIndexingJobManifest(config)
 
 	// Validate service account is set correctly
-	if job.Spec.Template.Spec.ServiceAccountName != "my-workload-sa" {
-		t.Errorf("Expected service account name 'my-workload-sa', got %s", job.Spec.Template.Spec.ServiceAccountName)
+	expectedSAName := "test-wi-azure-wi-sa"
+	if job.Spec.Template.Spec.ServiceAccountName != expectedSAName {
+		t.Errorf("Expected service account name '%s', got %s", expectedSAName, job.Spec.Template.Spec.ServiceAccountName)
 	}
 
 	// Validate that ACCESS_SECRET is not set for workload identity
@@ -638,7 +643,7 @@ func TestGenerateServiceAccountName(t *testing.T) {
 
 		name := GenerateServiceAccountName(autoIndexer)
 
-		expectedName := "my-workload-sa"
+		expectedName := "test-ai-azure-wi-sa"
 		if name != expectedName {
 			t.Errorf("Expected workload identity service account name %s, got %s", expectedName, name)
 		}
@@ -698,7 +703,7 @@ func TestGenerateServiceAccountManifest(t *testing.T) {
 
 		sa := GenerateServiceAccountManifest(autoIndexer)
 
-		expectedName := "my-workload-sa"
+		expectedName := "test-wi-azure-wi-sa"
 		if sa.Name != expectedName {
 			t.Errorf("Expected service account name %s, got %s", expectedName, sa.Name)
 		}
@@ -734,7 +739,7 @@ func TestGenerateServiceAccountManifest(t *testing.T) {
 
 		sa := GenerateServiceAccountManifest(autoIndexer)
 
-		expectedName := "my-workload-sa"
+		expectedName := "test-wi-azure-wi-sa"
 		if sa.Name != expectedName {
 			t.Errorf("Expected service account name %s, got %s", expectedName, sa.Name)
 		}
@@ -780,32 +785,6 @@ func TestGenerateRoleManifest(t *testing.T) {
 	// Check labels
 	if role.Labels[LabelAutoIndexerName] != autoIndexer.Name {
 		t.Errorf("Expected label %s=%s", LabelAutoIndexerName, autoIndexer.Name)
-	}
-}
-
-func TestAddCredentialsMounts(t *testing.T) {
-	autoIndexer := createTestAutoIndexer("test", "default", nil)
-	config := GetDefaultJobConfig(autoIndexer, JobTypeOneTime)
-	job := GenerateIndexingJobManifest(config)
-
-	// Count volumes and volume mounts before
-	volumesBefore := len(job.Spec.Template.Spec.Volumes)
-	mountsBefore := len(job.Spec.Template.Spec.Containers[0].VolumeMounts)
-
-	// Add credentials
-	addCredentialsMounts(job, autoIndexer.Spec.Credentials)
-
-	// Count volumes and volume mounts after
-	volumesAfter := len(job.Spec.Template.Spec.Volumes)
-	mountsAfter := len(job.Spec.Template.Spec.Containers[0].VolumeMounts)
-
-	// Should have added volume and mount
-	if volumesAfter <= volumesBefore {
-		t.Error("Should have added a volume for credentials")
-	}
-
-	if mountsAfter <= mountsBefore {
-		t.Error("Should have added a volume mount for credentials")
 	}
 }
 

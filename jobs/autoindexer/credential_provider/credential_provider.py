@@ -23,12 +23,9 @@ class CredentialProvider(ABC):
     """Abstract base class for credential providers."""
 
     @abstractmethod
-    def get_token(self, scopes: str) -> str:
+    def get_token(self) -> str:
         """
         Retrieve a token for authentication.
-
-        Args:
-            scopes: The OAuth 2.0 scopes to request the token for.
 
         Returns:
             str: A token string for authentication
