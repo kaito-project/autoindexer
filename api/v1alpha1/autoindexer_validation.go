@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"regexp"
 
+	"github.com/google/uuid"
 	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 	"k8s.io/klog/v2"
 	"knative.dev/pkg/apis"
@@ -72,11 +73,8 @@ func (a *AutoIndexer) validateCreate() (errs *apis.FieldError) {
 	}
 	// Validate Credentials if present
 	if a.Spec.Credentials != nil {
-		if a.Spec.Credentials.Type == "" {
-			errs = errs.Also(apis.ErrMissingField("credentials.type"))
-		}
-		if a.Spec.Credentials.Type == "SecretRef" && (a.Spec.Credentials.SecretRef == nil || a.Spec.Credentials.SecretRef.Name == "" || a.Spec.Credentials.SecretRef.Key == "") {
-			errs = errs.Also(apis.ErrMissingField("credentials.secretRef"))
+		if err := a.Spec.Credentials.validate(); err != nil {
+			errs = errs.Also(err.ViaField("credentials"))
 		}
 	}
 	// Validate Schedule pattern if present
@@ -200,6 +198,38 @@ func (d *DatabaseDataSourceSpec) validate() *apis.FieldError {
 		return apis.ErrMissingField("initialQuery")
 	}
 
+	return nil
+}
+
+func (c *CredentialsSpec) validate() *apis.FieldError {
+	if c == nil {
+		return apis.ErrMissingField("")
+	}
+	if c.Type == "" {
+		return apis.ErrMissingField("type")
+	}
+	switch c.Type {
+	case CredentialTypeSecretRef:
+		if c.SecretRef == nil || c.SecretRef.Name == "" || c.SecretRef.Key == "" {
+			return apis.ErrMissingField("secretRef")
+		}
+	case CredentialTypeWorkloadIdentity:
+		if c.WorkloadIdentityRef == nil || c.WorkloadIdentityRef.ServiceAccountName == "" || c.WorkloadIdentityRef.ClientID == "" {
+			return apis.ErrMissingField("workloadIdentityRef")
+		}
+
+		if _, err := uuid.Parse(c.WorkloadIdentityRef.ClientID); err != nil {
+			return apis.ErrInvalidValue(c.WorkloadIdentityRef.ClientID, "workloadIdentityRef.clientID")
+		}
+
+		if c.WorkloadIdentityRef.TenantID != nil {
+			if _, err := uuid.Parse(*c.WorkloadIdentityRef.TenantID); err != nil {
+				return apis.ErrInvalidValue(*c.WorkloadIdentityRef.TenantID, "workloadIdentityRef.tenantID")
+			}
+		}
+	default:
+		return apis.ErrInvalidValue(string(c.Type), "type")
+	}
 	return nil
 }
 

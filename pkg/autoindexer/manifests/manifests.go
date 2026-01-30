@@ -220,34 +220,31 @@ func generateEnvironmentVariables(autoIndexer *v1alpha1.AutoIndexer) []corev1.En
 					},
 				},
 			})
+		} else if autoIndexer.Spec.Credentials.Type == v1alpha1.CredentialTypeWorkloadIdentity {
+			// Add Azure Workload Identity environment variables
+			// These are automatically populated by the Azure Workload Identity webhook
+			// when the service account has the appropriate labels/annotations
+			if autoIndexer.Spec.Credentials.WorkloadIdentityRef != nil {
+				if autoIndexer.Spec.Credentials.WorkloadIdentityRef.ClientID != "" {
+					envVars = append(envVars, corev1.EnvVar{
+						Name:  "AZURE_CLIENT_ID",
+						Value: autoIndexer.Spec.Credentials.WorkloadIdentityRef.ClientID,
+					})
+				}
+				if autoIndexer.Spec.Credentials.WorkloadIdentityRef.TenantID != nil {
+					envVars = append(envVars, corev1.EnvVar{
+						Name:  "AZURE_TENANT_ID",
+						Value: *autoIndexer.Spec.Credentials.WorkloadIdentityRef.TenantID,
+					})
+				}
+			}
+			// AZURE_FEDERATED_TOKEN_FILE is typically injected by the workload identity webhook
+			// but we can set it explicitly if needed
+			envVars = append(envVars, corev1.EnvVar{
+				Name:  "AZURE_FEDERATED_TOKEN_FILE",
+				Value: "/var/run/secrets/azure/tokens/azure-identity-token",
+			})
 		}
-	}
-
-	// Add Azure Access Token for Database data source with Kusto language
-	if autoIndexer.Spec.DataSource.Type == v1alpha1.DataSourceTypeDatabase &&
-		autoIndexer.Spec.DataSource.Database != nil &&
-		autoIndexer.Spec.DataSource.Database.Language == "Kusto" {
-		// Check if there's a Secret for database credentials
-		// Convention: <autoindexer-name>-kusto-sp or use credentials.secretRef
-		secretName := fmt.Sprintf("%s-kusto-sp", autoIndexer.Name)
-		if autoIndexer.Spec.Credentials != nil && autoIndexer.Spec.Credentials.SecretRef != nil {
-			secretName = autoIndexer.Spec.Credentials.SecretRef.Name
-		}
-
-		envVars = append(envVars,
-			corev1.EnvVar{
-				Name: "AZURE_ACCESS_TOKEN",
-				ValueFrom: &corev1.EnvVarSource{
-					SecretKeyRef: &corev1.SecretKeySelector{
-						LocalObjectReference: corev1.LocalObjectReference{
-							Name: secretName,
-						},
-						Key:      "AZURE_ACCESS_TOKEN",
-						Optional: ptr.To(false), // Required for Kusto authentication
-					},
-				},
-			},
-		)
 	}
 
 	return envVars
@@ -321,53 +318,6 @@ func getResourceRequirements(limits *corev1.ResourceRequirements) corev1.Resourc
 	}
 }
 
-// addCredentialsMounts adds volume mounts for credentials
-func addCredentialsMounts(job *batchv1.Job, credentials *v1alpha1.CredentialsSpec) {
-	if credentials.SecretRef == nil {
-		return
-	}
-
-	volumeName := "credentials"
-	mountPath := "/etc/credentials"
-
-	// Add volume
-	job.Spec.Template.Spec.Volumes = append(job.Spec.Template.Spec.Volumes, corev1.Volume{
-		Name: volumeName,
-		VolumeSource: corev1.VolumeSource{
-			Secret: &corev1.SecretVolumeSource{
-				SecretName: credentials.SecretRef.Name,
-				Items: []corev1.KeyToPath{
-					{
-						Key:  credentials.SecretRef.Key,
-						Path: "credentials",
-					},
-				},
-			},
-		},
-	})
-
-	// Add volume mount to container
-	if len(job.Spec.Template.Spec.Containers) > 0 {
-		job.Spec.Template.Spec.Containers[0].VolumeMounts = append(
-			job.Spec.Template.Spec.Containers[0].VolumeMounts,
-			corev1.VolumeMount{
-				Name:      volumeName,
-				MountPath: mountPath,
-				ReadOnly:  true,
-			},
-		)
-
-		// Add environment variable pointing to the credential file
-		job.Spec.Template.Spec.Containers[0].Env = append(
-			job.Spec.Template.Spec.Containers[0].Env,
-			corev1.EnvVar{
-				Name:  "CREDENTIALS_FILE",
-				Value: fmt.Sprintf("%s/credentials", mountPath),
-			},
-		)
-	}
-}
-
 // generateSpecHash creates a hash of the AutoIndexer spec for change detection
 func generateSpecHash(spec v1alpha1.AutoIndexerSpec) string {
 	// Create proper SHA256 hash from the serialized spec
@@ -390,6 +340,9 @@ func GenerateJobName(autoIndexer *v1alpha1.AutoIndexer, jobType string) string {
 
 // GenerateServiceAccountName creates a unique service account name for the AutoIndexer
 func GenerateServiceAccountName(autoIndexer *v1alpha1.AutoIndexer) string {
+	if autoIndexer != nil && autoIndexer.Spec.Credentials != nil && autoIndexer.Spec.Credentials.Type == v1alpha1.CredentialTypeWorkloadIdentity {
+		return autoIndexer.Spec.Credentials.WorkloadIdentityRef.ServiceAccountName
+	}
 	return fmt.Sprintf("%s-job-sa", autoIndexer.Name)
 }
 
@@ -440,7 +393,7 @@ func GetDefaultJobConfig(autoIndexer *v1alpha1.AutoIndexer, jobType string) JobC
 
 // GenerateServiceAccountManifest creates a ServiceAccount for AutoIndexer jobs
 func GenerateServiceAccountManifest(autoIndexer *v1alpha1.AutoIndexer) *corev1.ServiceAccount {
-	return &corev1.ServiceAccount{
+	sa := &corev1.ServiceAccount{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      GenerateServiceAccountName(autoIndexer),
 			Namespace: autoIndexer.Namespace,
@@ -453,6 +406,17 @@ func GenerateServiceAccountManifest(autoIndexer *v1alpha1.AutoIndexer) *corev1.S
 			},
 		},
 	}
+
+	if autoIndexer.Spec.Credentials != nil && autoIndexer.Spec.Credentials.Type == v1alpha1.CredentialTypeWorkloadIdentity {
+		sa.Annotations = map[string]string{
+			"azure.workload.identity/client-id": autoIndexer.Spec.Credentials.WorkloadIdentityRef.ClientID,
+		}
+		if autoIndexer.Spec.Credentials.WorkloadIdentityRef.TenantID != nil {
+			sa.Annotations["azure.workload.identity/tenant-id"] = *autoIndexer.Spec.Credentials.WorkloadIdentityRef.TenantID
+		}
+	}
+
+	return sa
 }
 
 // GenerateRoleManifest creates a Role for AutoIndexer jobs to access the CR

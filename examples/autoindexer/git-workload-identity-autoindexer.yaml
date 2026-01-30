@@ -1,0 +1,26 @@
+apiVersion: autoindexer.kaito.sh/v1alpha1
+kind: AutoIndexer
+metadata:
+  name: git-workload-identity-example
+  namespace: default
+spec:
+  ragEngine: my-rag-engine
+  indexName: my-repo-index
+  
+  # Azure Workload Identity for Azure DevOps Git repos
+  credentials:
+    type: WorkloadIdentity
+    workloadIdentityRef:
+      serviceAccountName: autoindexer-git-workload-identity-example-sa
+      clientID: "00000000-0000-0000-0000-000000000000"  # Replace with your Azure AD app client ID
+  
+  # Git data source
+  dataSource:
+    type: Git
+    git:
+      repository: "https://dev.azure.com/your-org/your-project/_git/your-repo"
+      branch: main
+      paths:
+        - "*.md"
+        - "*.py"
+        - "docs/"

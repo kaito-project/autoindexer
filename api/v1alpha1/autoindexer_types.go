@@ -201,14 +201,19 @@ type CredentialsSpec struct {
 	// Secret reference containing credentials
 	// +optional
 	SecretRef *SecretKeyRef `json:"secretRef,omitempty"`
+
+	// Workload identity reference containing credentials
+	// +optional
+	WorkloadIdentityRef *WorkloadIdentityRef `json:"workloadIdentityRef,omitempty"`
 }
 
 // CredentialType defines the supported credential types
-// +kubebuilder:validation:Enum=SecretRef
+// +kubebuilder:validation:Enum=SecretRef;WorkloadIdentity
 type CredentialType string
 
 const (
-	CredentialTypeSecretRef CredentialType = "SecretRef"
+	CredentialTypeSecretRef        CredentialType = "SecretRef"
+	CredentialTypeWorkloadIdentity CredentialType = "WorkloadIdentity"
 )
 
 // SecretKeyRef references a key in a Secret
@@ -220,6 +225,21 @@ type SecretKeyRef struct {
 	// Key within the secret
 	// +kubebuilder:validation:Required
 	Key string `json:"key"`
+}
+
+// WorkloadIdentityRef references a workload identity configuration
+type WorkloadIdentityRef struct {
+	// ServiceAccountName associated with the workload identity
+	// +kubebuilder:validation:Required
+	ServiceAccountName string `json:"serviceAccountName"`
+
+	// ClientID of the workload identity
+	// +kubebuilder:validation:Required
+	ClientID string `json:"clientID"`
+
+	// TenantID of the workload identity
+	// +optional
+	TenantID *string `json:"tenantID,omitempty"`
 }
 
 // AutoIndexerStatus defines the observed state of AutoIndexer

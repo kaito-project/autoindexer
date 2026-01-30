@@ -26,6 +26,8 @@ from autoindexer.rag.rag_client import KAITORAGClient
 
 from kaito_rag_engine_client.models import Document
 
+from autoindexer.credential_provider.credential_provider import CredentialProvider
+
 logger = logging.getLogger(__name__)
 
 
@@ -39,7 +41,7 @@ class KustoDataSourceHandler(DataSourceHandler):
     - Tracking last execution time via AutoIndexer status
     """
 
-    def __init__(self, index_name: str, config: dict[str, Any], rag_client: KAITORAGClient, autoindexer_client: AutoIndexerK8sClient, credentials: str | None = None):
+    def __init__(self, index_name: str, config: dict[str, Any], rag_client: KAITORAGClient, autoindexer_client: AutoIndexerK8sClient, credentials: CredentialProvider | None = None):
         """Initialize the Kusto data source handler."""
         self.index_name = index_name
         self.config = config
@@ -152,10 +154,14 @@ class KustoDataSourceHandler(DataSourceHandler):
         if len(all_clusters) > 1:
             logger.info(f"Cross-cluster query detected. Additional clusters: {all_clusters[1:]}")
 
+        all_clusters_as_scopes = " ".join([f"https://{cluster_url.replace("https://", "").replace("http://", "")}.kusto.windows.net/.default" for cluster_url in all_clusters])
         # Get access token
-        access_token = os.environ.get("AZURE_ACCESS_TOKEN")
+        if not self.credentials:
+            raise DataSourceError("Credentials are required for Kusto authentication")
+        
+        access_token = self.credentials.get_token(scopes=all_clusters_as_scopes)
         if not access_token:
-            raise DataSourceError("AZURE_ACCESS_TOKEN environment variable is required for Kusto authentication")
+            raise DataSourceError("Failed to retrieve access token for Kusto authentication")
         
         logger.info("Using Access Token authentication")
         kcsb = KustoConnectionStringBuilder.with_aad_application_token_authentication(

@@ -22,6 +22,7 @@ from typing import Any
 from pathlib import Path
 
 from autoindexer.content_handler.factory import ContentHandlerFactory
+from autoindexer.credential_provider.credential_provider import CredentialProvider
 from autoindexer.data_source_handler.handler import (
     DataSourceError,
     DataSourceHandler,
@@ -49,7 +50,7 @@ class GitDataSourceHandler(DataSourceHandler):
     - Full repository indexing for new repositories
     """
 
-    def __init__(self, index_name: str, config: dict[str, Any], rag_client: KAITORAGClient, autoindexer_client: AutoIndexerK8sClient, credentials: str | None = None):
+    def __init__(self, index_name: str, config: dict[str, Any], rag_client: KAITORAGClient, autoindexer_client: AutoIndexerK8sClient, credentials: CredentialProvider | None = None):
         """Initialize the Git data source handler."""
         self.index_name = index_name
         self.config = config
@@ -153,8 +154,10 @@ class GitDataSourceHandler(DataSourceHandler):
             # Build clone URL with credentials if available
             clone_url = self.repository
             if self.credentials and "https://" in clone_url:
+                # Get token from credential provider (for Git, we typically use default scope)
+                token = self.credentials.get_token(scopes="https://dev.azure.com/.default")
                 # Insert credentials into HTTPS URL
-                clone_url = clone_url.replace("https://", f"https://{self.credentials}@")
+                clone_url = clone_url.replace("https://", f"https://{token}@")
             
             logger.info(f"Cloning repository from {self.repository}")
             self.repo = git.Repo.clone_from(clone_url, self.work_dir)
