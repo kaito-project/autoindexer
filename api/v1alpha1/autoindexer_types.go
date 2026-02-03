@@ -261,8 +261,8 @@ type AzureWorkloadIdentityRef struct {
 	ClientID string `json:"clientID"`
 
 	// TenantID of the workload identity
-	// +optional
-	TenantID *string `json:"tenantID,omitempty"`
+	// +kubebuilder:validation:Required
+	TenantID string `json:"tenantID,omitempty"`
 }
 
 // AutoIndexerStatus defines the observed state of AutoIndexer

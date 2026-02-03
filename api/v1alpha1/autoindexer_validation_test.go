@@ -381,21 +381,7 @@ func TestAutoIndexer_Validate(t *testing.T) {
 						ServiceAccountName: "my-service-account",
 						ClientID:           "12345678-1234-1234-1234-123456789abc",
 						Scope:              "https://storage.azure.com/.default",
-					},
-				},
-			}
-		}, false},
-		{"valid workloadidentity with tenantID", func(a *AutoIndexer) {
-			tenantID := "87654321-4321-4321-4321-cba987654321"
-			a.Spec.Credentials = &CredentialsSpec{
-				Type: "WorkloadIdentity",
-				WorkloadIdentityRef: &WorkloadIdentityRef{
-					CloudProvider: "Azure",
-					AzureWorkloadIdentityRef: &AzureWorkloadIdentityRef{
-						ServiceAccountName: "my-service-account",
-						ClientID:           "12345678-1234-1234-1234-123456789abc",
-						Scope:              "https://storage.azure.com/.default",
-						TenantID:           &tenantID,
+						TenantID:           "87654321-4321-4321-4321-cba987654321",
 					},
 				},
 			}
@@ -426,6 +412,19 @@ func TestAutoIndexer_Validate(t *testing.T) {
 				},
 			}
 		}, true},
+		{"credentials workloadidentity missing tenantId", func(a *AutoIndexer) {
+			a.Spec.Credentials = &CredentialsSpec{
+				Type: "WorkloadIdentity",
+				WorkloadIdentityRef: &WorkloadIdentityRef{
+					CloudProvider: "Azure",
+					AzureWorkloadIdentityRef: &AzureWorkloadIdentityRef{
+						ServiceAccountName: "my-service-account",
+						ClientID:           "12345678-1234-1234-1234-123456789abc",
+						Scope:              "https://storage.azure.com/.default",
+					},
+				},
+			}
+		}, true},
 		{"credentials workloadidentity missing scope", func(a *AutoIndexer) {
 			a.Spec.Credentials = &CredentialsSpec{
 				Type: "WorkloadIdentity",
@@ -434,6 +433,7 @@ func TestAutoIndexer_Validate(t *testing.T) {
 					AzureWorkloadIdentityRef: &AzureWorkloadIdentityRef{
 						ServiceAccountName: "my-service-account",
 						ClientID:           "12345678-1234-1234-1234-123456789abc",
+						TenantID:           "87654321-4321-4321-4321-cba987654321",
 					},
 				},
 			}
@@ -446,6 +446,7 @@ func TestAutoIndexer_Validate(t *testing.T) {
 					AzureWorkloadIdentityRef: &AzureWorkloadIdentityRef{
 						ClientID: "12345678-1234-1234-1234-123456789abc",
 						Scope:    "https://storage.azure.com/.default",
+						TenantID: "87654321-4321-4321-4321-cba987654321",
 					},
 				},
 			}
@@ -485,7 +486,7 @@ func TestAutoIndexer_Validate(t *testing.T) {
 						ServiceAccountName: "my-service-account",
 						ClientID:           "12345678-1234-1234-1234-123456789abc",
 						Scope:              "https://storage.azure.com/.default",
-						TenantID:           &invalidTenantID,
+						TenantID:           invalidTenantID,
 					},
 				},
 			}
@@ -617,31 +618,12 @@ func TestCredentialsSpec_Validation(t *testing.T) {
 						ServiceAccountName: "my-service-account",
 						ClientID:           "12345678-1234-1234-1234-123456789abc",
 						Scope:              "https://storage.azure.com/.default",
+						TenantID:           "87654321-4321-4321-4321-cba987654321",
 					},
 				},
 			},
 			wantErr:     false,
 			description: "Valid WorkloadIdentity credentials should pass validation",
-		},
-		{
-			name: "valid WorkloadIdentity credentials with TenantID",
-			credentials: func() *CredentialsSpec {
-				tenantID := "87654321-4321-4321-4321-cba987654321"
-				return &CredentialsSpec{
-					Type: CredentialTypeWorkloadIdentity,
-					WorkloadIdentityRef: &WorkloadIdentityRef{
-						CloudProvider: CloudProviderAzure,
-						AzureWorkloadIdentityRef: &AzureWorkloadIdentityRef{
-							ServiceAccountName: "my-service-account",
-							ClientID:           "12345678-1234-1234-1234-123456789abc",
-							Scope:              "https://storage.azure.com/.default",
-							TenantID:           &tenantID,
-						},
-					},
-				}
-			}(),
-			wantErr:     false,
-			description: "Valid WorkloadIdentity credentials with TenantID should pass validation",
 		},
 		{
 			name: "missing credentials type",
@@ -795,7 +777,6 @@ func TestCredentialsSpec_Validation(t *testing.T) {
 		{
 			name: "WorkloadIdentity invalid tenantID format",
 			credentials: func() *CredentialsSpec {
-				invalidTenantID := "not-a-valid-uuid"
 				return &CredentialsSpec{
 					Type: CredentialTypeWorkloadIdentity,
 					WorkloadIdentityRef: &WorkloadIdentityRef{
@@ -804,7 +785,7 @@ func TestCredentialsSpec_Validation(t *testing.T) {
 							ServiceAccountName: "my-service-account",
 							ClientID:           "12345678-1234-1234-1234-123456789abc",
 							Scope:              "https://storage.azure.com/.default",
-							TenantID:           &invalidTenantID,
+							TenantID:           "not-a-valid-uuid",
 						},
 					},
 				}

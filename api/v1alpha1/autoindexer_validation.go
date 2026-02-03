@@ -240,6 +240,9 @@ func (az *AzureWorkloadIdentityRef) validate() *apis.FieldError {
 	if az.ClientID == "" {
 		return apis.ErrMissingField("clientID")
 	}
+	if az.TenantID == "" {
+		return apis.ErrMissingField("tenantID")
+	}
 	if az.ServiceAccountName == "" {
 		return apis.ErrMissingField("serviceAccountName")
 	}
@@ -249,10 +252,8 @@ func (az *AzureWorkloadIdentityRef) validate() *apis.FieldError {
 	if _, err := uuid.Parse(az.ClientID); err != nil {
 		return apis.ErrInvalidValue(az.ClientID, "clientID")
 	}
-	if az.TenantID != nil {
-		if _, err := uuid.Parse(*az.TenantID); err != nil {
-			return apis.ErrInvalidValue(*az.TenantID, "tenantID")
-		}
+	if _, err := uuid.Parse(az.TenantID); err != nil {
+		return apis.ErrInvalidValue(az.TenantID, "tenantID")
 	}
 	return nil
 }

@@ -237,10 +237,10 @@ func generateEnvironmentVariables(autoIndexer *v1alpha1.AutoIndexer) []corev1.En
 							Value: autoIndexer.Spec.Credentials.WorkloadIdentityRef.AzureWorkloadIdentityRef.ClientID,
 						})
 					}
-					if autoIndexer.Spec.Credentials.WorkloadIdentityRef.AzureWorkloadIdentityRef.TenantID != nil {
+					if autoIndexer.Spec.Credentials.WorkloadIdentityRef.AzureWorkloadIdentityRef.TenantID != "" {
 						envVars = append(envVars, corev1.EnvVar{
 							Name:  "AZURE_TENANT_ID",
-							Value: *autoIndexer.Spec.Credentials.WorkloadIdentityRef.AzureWorkloadIdentityRef.TenantID,
+							Value: autoIndexer.Spec.Credentials.WorkloadIdentityRef.AzureWorkloadIdentityRef.TenantID,
 						})
 					}
 					if autoIndexer.Spec.Credentials.WorkloadIdentityRef.AzureWorkloadIdentityRef.Scope != "" {
@@ -500,8 +500,8 @@ func GenerateServiceAccountManifest(autoIndexer *v1alpha1.AutoIndexer) *corev1.S
 				sa.Annotations = map[string]string{
 					"azure.workload.identity/client-id": autoIndexer.Spec.Credentials.WorkloadIdentityRef.AzureWorkloadIdentityRef.ClientID,
 				}
-				if autoIndexer.Spec.Credentials.WorkloadIdentityRef.AzureWorkloadIdentityRef.TenantID != nil {
-					sa.Annotations["azure.workload.identity/tenant-id"] = *autoIndexer.Spec.Credentials.WorkloadIdentityRef.AzureWorkloadIdentityRef.TenantID
+				if autoIndexer.Spec.Credentials.WorkloadIdentityRef.AzureWorkloadIdentityRef.TenantID != "" {
+					sa.Annotations["azure.workload.identity/tenant-id"] = autoIndexer.Spec.Credentials.WorkloadIdentityRef.AzureWorkloadIdentityRef.TenantID
 				}
 			}
 		}

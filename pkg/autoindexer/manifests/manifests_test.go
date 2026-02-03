@@ -79,7 +79,7 @@ func createTestAutoIndexerWithWorkloadIdentity(name, namespace string, serviceAc
 						ServiceAccountName: serviceAccountName,
 						ClientID:           clientID,
 						Scope:              "https://storage.azure.com/.default",
-						TenantID:           tenantID,
+						TenantID:           *tenantID,
 					},
 				},
 			},
@@ -182,7 +182,8 @@ func TestGenerateIndexingJobManifest(t *testing.T) {
 
 func TestGenerateIndexingJobManifestWithWorkloadIdentity(t *testing.T) {
 	clientID := "12345678-1234-1234-1234-123456789abc"
-	autoIndexer := createTestAutoIndexerWithWorkloadIdentity("test-wi", "default", "my-workload-sa", clientID, nil)
+	tenantID := "87654321-4321-4321-4321-cba987654321"
+	autoIndexer := createTestAutoIndexerWithWorkloadIdentity("test-wi", "default", "my-workload-sa", clientID, &tenantID)
 
 	config := GetDefaultJobConfig(autoIndexer, JobTypeOneTime)
 	job := GenerateIndexingJobManifest(config)
@@ -442,7 +443,8 @@ func TestGenerateEnvironmentVariables(t *testing.T) {
 
 func TestGenerateEnvironmentVariablesWorkloadIdentity(t *testing.T) {
 	clientID := "12345678-1234-1234-1234-123456789abc"
-	autoIndexer := createTestAutoIndexerWithWorkloadIdentity("test-wi", "default", "my-workload-sa", clientID, nil)
+	tenantID := "87654321-4321-4321-4321-cba987654321"
+	autoIndexer := createTestAutoIndexerWithWorkloadIdentity("test-wi", "default", "my-workload-sa", clientID, &tenantID)
 
 	envVars := generateEnvironmentVariables(autoIndexer)
 
@@ -638,7 +640,8 @@ func TestGenerateServiceAccountName(t *testing.T) {
 	})
 
 	t.Run("workload identity service account name", func(t *testing.T) {
-		autoIndexer := createTestAutoIndexerWithWorkloadIdentity("test-ai", "default", "my-workload-sa", "12345678-1234-1234-1234-123456789abc", nil)
+		tenantID := "87654321-4321-4321-4321-cba987654321"
+		autoIndexer := createTestAutoIndexerWithWorkloadIdentity("test-ai", "default", "my-workload-sa", "12345678-1234-1234-1234-123456789abc", &tenantID)
 
 		name := GenerateServiceAccountName(autoIndexer)
 
@@ -693,41 +696,6 @@ func TestGenerateServiceAccountManifest(t *testing.T) {
 		// Should not have workload identity annotations
 		if len(sa.Annotations) > 0 {
 			t.Error("Default service account should not have annotations")
-		}
-	})
-
-	t.Run("workload identity service account manifest without tenant ID", func(t *testing.T) {
-		clientID := "12345678-1234-1234-1234-123456789abc"
-		autoIndexer := createTestAutoIndexerWithWorkloadIdentity("test-wi", "default", "my-workload-sa", clientID, nil)
-
-		sa := GenerateServiceAccountManifest(autoIndexer)
-
-		expectedName := "my-workload-sa"
-		if sa.Name != expectedName {
-			t.Errorf("Expected service account name %s, got %s", expectedName, sa.Name)
-		}
-
-		if sa.Namespace != autoIndexer.Namespace {
-			t.Errorf("Expected namespace %s, got %s", autoIndexer.Namespace, sa.Namespace)
-		}
-
-		// Check workload identity annotations
-		if sa.Annotations == nil {
-			t.Fatal("Expected annotations for workload identity")
-		}
-
-		if sa.Annotations["azure.workload.identity/client-id"] != clientID {
-			t.Errorf("Expected client-id annotation %s, got %s", clientID, sa.Annotations["azure.workload.identity/client-id"])
-		}
-
-		// Should not have tenant-id annotation when not provided
-		if _, exists := sa.Annotations["azure.workload.identity/tenant-id"]; exists {
-			t.Error("Should not have tenant-id annotation when tenant ID is not provided")
-		}
-
-		// Check labels
-		if sa.Labels[LabelAutoIndexerName] != autoIndexer.Name {
-			t.Errorf("Expected label %s=%s", LabelAutoIndexerName, autoIndexer.Name)
 		}
 	})
 
