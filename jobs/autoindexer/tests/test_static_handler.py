@@ -22,6 +22,7 @@ from autoindexer.data_source_handler.handler import DataSourceError
 from autoindexer.data_source_handler.static_handler import StaticDataSourceHandler
 from autoindexer.k8s.k8s_client import AutoIndexerK8sClient
 from autoindexer.rag.rag_client import KAITORAGClient
+from autoindexer.credential_provider.secret_credential_provider import SecretCredentialProvider
 
 
 class TestStaticDataSourceHandler:
@@ -40,7 +41,7 @@ class TestStaticDataSourceHandler:
     @pytest.fixture
     def credentials(self):
         """Fixture providing test credentials."""
-        return "test-bearer-token"
+        return None
 
     @pytest.fixture
     def mock_rag_client(self):
@@ -281,8 +282,9 @@ class TestStaticDataSourceHandler:
         mock_response.headers = {'content-type': 'text/plain'}
         mock_response.iter_content.return_value = [b'Authenticated content']
         mock_get.return_value.__enter__.return_value = mock_response
+        overwriteCreds = SecretCredentialProvider(token="test-bearer-token")
         
-        handler = StaticDataSourceHandler("test-index", valid_config, mock_rag_client, mock_autoindexer_client, credentials)
+        handler = StaticDataSourceHandler("test-index", valid_config, mock_rag_client, mock_autoindexer_client, overwriteCreds)
         handler._fetch_content_from_url("https://example.com/secure.txt")
         
         # Verify Bearer token authentication was used
