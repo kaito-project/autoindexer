@@ -13,7 +13,6 @@
 
 
 import logging
-import os
 from datetime import UTC, datetime
 from typing import Any
 
@@ -161,8 +160,7 @@ class KustoDataSourceHandler(DataSourceHandler):
         access_token = self.credentials.get_token()
         if not access_token:
             raise DataSourceError("Failed to retrieve access token for Kusto authentication")
-        
-        logger.info("Using Access Token authentication")
+
         kcsb = KustoConnectionStringBuilder.with_aad_application_token_authentication(
             cluster_url,
             access_token

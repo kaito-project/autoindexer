@@ -19,7 +19,6 @@ import tempfile
 import shutil
 from datetime import UTC, datetime
 from typing import Any
-from pathlib import Path
 
 from autoindexer.content_handler.factory import ContentHandlerFactory
 from autoindexer.credential_provider.credential_provider import CredentialProvider

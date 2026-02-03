@@ -195,7 +195,7 @@ type DatabaseDataSourceSpec struct {
 type CredentialsSpec struct {
 	// Type specifies the credential type
 	// +kubebuilder:validation:Required
-	// +kubebuilder:validation:Enum=SecretRef
+	// +kubebuilder:validation:Enum=SecretRef;WorkloadIdentity
 	Type CredentialType `json:"type"`
 
 	// Secret reference containing credentials

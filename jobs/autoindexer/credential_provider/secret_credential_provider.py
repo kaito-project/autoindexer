@@ -13,7 +13,7 @@
 
 import logging
 
-from jobs.autoindexer.credential_provider.credential_provider import CredentialProvider
+from autoindexer.credential_provider.credential_provider import CredentialProvider
 
 logger = logging.getLogger(__name__)
 

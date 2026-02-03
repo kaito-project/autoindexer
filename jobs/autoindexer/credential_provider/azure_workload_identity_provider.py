@@ -17,7 +17,7 @@ import os
 from azure.identity import WorkloadIdentityCredential
 from azure.core.exceptions import ClientAuthenticationError
 
-from jobs.autoindexer.credential_provider.credential_provider import CredentialProvider
+from autoindexer.credential_provider.credential_provider import CredentialProvider
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +29,7 @@ class AzureWorkloadIdentityProvider(CredentialProvider):
         self.client_id = client_id or os.getenv("AZURE_CLIENT_ID")
         self.tenant_id = tenant_id or os.getenv("AZURE_TENANT_ID")
         self.token_file_path = token_file_path or os.getenv("AZURE_FEDERATED_TOKEN_FILE")
-        self.token_scopes = os.getenv("AZURE_TOKEN_SCOPE")
+        self.token_scopes =   os.getenv("AZURE_TOKEN_SCOPE", "").split(",")
         self.credential = None
 
     def get_token(self) -> str:
@@ -49,9 +49,9 @@ class AzureWorkloadIdentityProvider(CredentialProvider):
                     tenant_id=self.tenant_id,
                     token_file_path=self.token_file_path,
                 )
-            
+
             # Get the access token
-            token = self.credential.get_token(scopes=self.token_scopes)
+            token = self.credential.get_token(*self.token_scopes)
             
             logger.info("Successfully retrieved Azure AD token")
             return token.token

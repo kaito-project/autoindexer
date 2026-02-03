@@ -110,7 +110,8 @@ func GenerateIndexingJobManifest(config JobConfig) *batchv1.Job {
 		Spec: batchv1.JobSpec{
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
-					Labels: labels,
+					Labels:      labels,
+					Annotations: getJobSpecAnnotations(config.AutoIndexer),
 				},
 				Spec: corev1.PodSpec{
 					RestartPolicy: corev1.RestartPolicyOnFailure,
@@ -118,6 +119,7 @@ func GenerateIndexingJobManifest(config JobConfig) *batchv1.Job {
 						generateIndexingContainer(config),
 					},
 					ServiceAccountName: config.ServiceAccountName,
+					Volumes:            generateVolumeDefinitions(config),
 				},
 			},
 		},
@@ -187,6 +189,7 @@ func generateIndexingContainer(config JobConfig) corev1.Container {
 		Env:             generateEnvironmentVariables(config.AutoIndexer),
 		Command:         []string{"python"},
 		Args:            []string{"main.py", "--mode=index"},
+		VolumeMounts:    generateVolumeMounts(config),
 	}
 
 	return container
@@ -246,12 +249,71 @@ func generateEnvironmentVariables(autoIndexer *v1alpha1.AutoIndexer) []corev1.En
 							Value: autoIndexer.Spec.Credentials.WorkloadIdentityRef.AzureWorkloadIdentityRef.Scope,
 						})
 					}
+					envVars = append(envVars, corev1.EnvVar{
+						Name:  "AZURE_FEDERATED_TOKEN_FILE",
+						Value: "/var/run/secrets/azure/tokens/identity/token",
+					})
 				}
 			}
 		}
 	}
 
 	return envVars
+}
+
+// generateVolumeMounts creates volume mounts for the indexing container
+func generateVolumeMounts(config JobConfig) []corev1.VolumeMount {
+	volumeMounts := []corev1.VolumeMount{}
+
+	if config.AutoIndexer.Spec.Credentials != nil && config.AutoIndexer.Spec.Credentials.Type == v1alpha1.CredentialTypeWorkloadIdentity {
+		if config.AutoIndexer.Spec.Credentials.WorkloadIdentityRef != nil {
+			switch config.AutoIndexer.Spec.Credentials.WorkloadIdentityRef.CloudProvider {
+			case v1alpha1.CloudProviderAzure:
+				// Mount the token volume for Azure Workload Identity
+				volumeMount := corev1.VolumeMount{
+					Name:      "azure-identity-token",
+					MountPath: "/var/run/secrets/azure/tokens",
+					ReadOnly:  true,
+				}
+				volumeMounts = append(volumeMounts, volumeMount)
+			}
+		}
+	}
+
+	return volumeMounts
+}
+
+// generateVolumeDefinitions creates volume definitions
+func generateVolumeDefinitions(config JobConfig) []corev1.Volume {
+	volumes := []corev1.Volume{}
+
+	if config.AutoIndexer.Spec.Credentials != nil && config.AutoIndexer.Spec.Credentials.Type == v1alpha1.CredentialTypeWorkloadIdentity {
+		if config.AutoIndexer.Spec.Credentials.WorkloadIdentityRef != nil {
+			switch config.AutoIndexer.Spec.Credentials.WorkloadIdentityRef.CloudProvider {
+			case v1alpha1.CloudProviderAzure:
+				// Define the token volume for Azure Workload Identity
+				volume := corev1.Volume{
+					Name: "azure-identity-token",
+					VolumeSource: corev1.VolumeSource{
+						Projected: &corev1.ProjectedVolumeSource{
+							Sources: []corev1.VolumeProjection{
+								{
+									ServiceAccountToken: &corev1.ServiceAccountTokenProjection{
+										Audience:          "api://AzureADTokenExchange",
+										ExpirationSeconds: ptr.To[int64](3600),
+										Path:              "identity/token",
+									},
+								},
+							},
+						},
+					},
+				}
+				volumes = append(volumes, volume)
+			}
+		}
+	}
+
+	return volumes
 }
 
 // generateRAGEngineEndpoint creates the RAGEngine service endpoint URL
@@ -308,6 +370,19 @@ func getJobLabels(autoIndexer *v1alpha1.AutoIndexer) map[string]string {
 	}
 }
 
+// getJobSpecAnnotations returns annotations for the job spec
+func getJobSpecAnnotations(autoIndexer *v1alpha1.AutoIndexer) map[string]string {
+	annotations := make(map[string]string)
+
+	if autoIndexer != nil && autoIndexer.Spec.Credentials != nil && autoIndexer.Spec.Credentials.Type == v1alpha1.CredentialTypeWorkloadIdentity {
+		if autoIndexer.Spec.Credentials.WorkloadIdentityRef != nil && autoIndexer.Spec.Credentials.WorkloadIdentityRef.CloudProvider == v1alpha1.CloudProviderAzure {
+			annotations["azure.workload.identity/use"] = "true"
+		}
+	}
+
+	return annotations
+}
+
 // getResourceRequirements returns resource requirements with defaults
 func getResourceRequirements(limits *corev1.ResourceRequirements) corev1.ResourceRequirements {
 	if limits != nil {
@@ -349,7 +424,7 @@ func GenerateServiceAccountName(autoIndexer *v1alpha1.AutoIndexer) string {
 			switch autoIndexer.Spec.Credentials.WorkloadIdentityRef.CloudProvider {
 			case v1alpha1.CloudProviderAzure:
 				if autoIndexer.Spec.Credentials.WorkloadIdentityRef.AzureWorkloadIdentityRef != nil && autoIndexer.Spec.Credentials.WorkloadIdentityRef.AzureWorkloadIdentityRef.ServiceAccountName != "" {
-					return fmt.Sprintf("%s-azure-wi-sa", autoIndexer.Name)
+					return autoIndexer.Spec.Credentials.WorkloadIdentityRef.AzureWorkloadIdentityRef.ServiceAccountName
 				}
 			}
 		}

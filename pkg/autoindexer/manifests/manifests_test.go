@@ -188,9 +188,8 @@ func TestGenerateIndexingJobManifestWithWorkloadIdentity(t *testing.T) {
 	job := GenerateIndexingJobManifest(config)
 
 	// Validate service account is set correctly
-	expectedSAName := "test-wi-azure-wi-sa"
-	if job.Spec.Template.Spec.ServiceAccountName != expectedSAName {
-		t.Errorf("Expected service account name '%s', got %s", expectedSAName, job.Spec.Template.Spec.ServiceAccountName)
+	if job.Spec.Template.Spec.ServiceAccountName != "my-workload-sa" {
+		t.Errorf("Expected service account name 'my-workload-sa', got %s", job.Spec.Template.Spec.ServiceAccountName)
 	}
 
 	// Validate that ACCESS_SECRET is not set for workload identity
@@ -643,7 +642,7 @@ func TestGenerateServiceAccountName(t *testing.T) {
 
 		name := GenerateServiceAccountName(autoIndexer)
 
-		expectedName := "test-ai-azure-wi-sa"
+		expectedName := "my-workload-sa"
 		if name != expectedName {
 			t.Errorf("Expected workload identity service account name %s, got %s", expectedName, name)
 		}
@@ -703,7 +702,7 @@ func TestGenerateServiceAccountManifest(t *testing.T) {
 
 		sa := GenerateServiceAccountManifest(autoIndexer)
 
-		expectedName := "test-wi-azure-wi-sa"
+		expectedName := "my-workload-sa"
 		if sa.Name != expectedName {
 			t.Errorf("Expected service account name %s, got %s", expectedName, sa.Name)
 		}
@@ -739,7 +738,7 @@ func TestGenerateServiceAccountManifest(t *testing.T) {
 
 		sa := GenerateServiceAccountManifest(autoIndexer)
 
-		expectedName := "test-wi-azure-wi-sa"
+		expectedName := "my-workload-sa"
 		if sa.Name != expectedName {
 			t.Errorf("Expected service account name %s, got %s", expectedName, sa.Name)
 		}
