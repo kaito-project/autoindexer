@@ -282,9 +282,9 @@ class TestStaticDataSourceHandler:
         mock_response.headers = {'content-type': 'text/plain'}
         mock_response.iter_content.return_value = [b'Authenticated content']
         mock_get.return_value.__enter__.return_value = mock_response
-        overwriteCreds = SecretCredentialProvider(token="test-bearer-token")
+        credentials = SecretCredentialProvider(token="test-bearer-token")
         
-        handler = StaticDataSourceHandler("test-index", valid_config, mock_rag_client, mock_autoindexer_client, overwriteCreds)
+        handler = StaticDataSourceHandler("test-index", valid_config, mock_rag_client, mock_autoindexer_client, credentials)
         handler._fetch_content_from_url("https://example.com/secure.txt")
         
         # Verify Bearer token authentication was used

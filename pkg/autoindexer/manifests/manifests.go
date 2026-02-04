@@ -45,6 +45,11 @@ const (
 	LabelJobType              = "autoindexer.kaito.sh/job-type"
 	LabelDataSourceType       = "autoindexer.kaito.sh/datasource-type"
 
+	AnnotationsSpecHash        = "autoindexer.kaito.sh/spec-hash"
+	AnnotationsAzureWI         = "azure.workload.identity/use"
+	AnnotationsAzureWIClientID = "azure.workload.identity/client-id"
+	AnnotationsAzureWITenantID = "azure.workload.identity/tenant-id"
+
 	// Job type values
 	JobTypeOneTime   = "one-time"
 	JobTypeScheduled = "scheduled"
@@ -101,7 +106,7 @@ func GenerateIndexingJobManifest(config JobConfig) *batchv1.Job {
 			Namespace: config.AutoIndexer.Namespace,
 			Labels:    labels,
 			Annotations: map[string]string{
-				"autoindexer.kaito.sh/spec-hash": generateSpecHash(config.AutoIndexer.Spec),
+				AnnotationsSpecHash: generateSpecHash(config.AutoIndexer.Spec),
 			},
 			OwnerReferences: []metav1.OwnerReference{
 				*metav1.NewControllerRef(config.AutoIndexer, v1alpha1.GroupVersion.WithKind("AutoIndexer")),
@@ -150,7 +155,7 @@ func GenerateIndexingCronJobManifest(config JobConfig) *batchv1.CronJob {
 			Namespace: config.AutoIndexer.Namespace,
 			Labels:    labels,
 			Annotations: map[string]string{
-				"autoindexer.kaito.sh/spec-hash": generateSpecHash(config.AutoIndexer.Spec),
+				AnnotationsSpecHash: generateSpecHash(config.AutoIndexer.Spec),
 			},
 			OwnerReferences: []metav1.OwnerReference{
 				*metav1.NewControllerRef(config.AutoIndexer, v1alpha1.GroupVersion.WithKind("AutoIndexer")),
@@ -376,7 +381,7 @@ func getJobSpecAnnotations(autoIndexer *v1alpha1.AutoIndexer) map[string]string 
 
 	if autoIndexer != nil && autoIndexer.Spec.Credentials != nil && autoIndexer.Spec.Credentials.Type == v1alpha1.CredentialTypeWorkloadIdentity {
 		if autoIndexer.Spec.Credentials.WorkloadIdentityRef != nil && autoIndexer.Spec.Credentials.WorkloadIdentityRef.CloudProvider == v1alpha1.CloudProviderAzure {
-			annotations["azure.workload.identity/use"] = "true"
+			annotations[AnnotationsAzureWI] = "true"
 		}
 	}
 
@@ -498,10 +503,8 @@ func GenerateServiceAccountManifest(autoIndexer *v1alpha1.AutoIndexer) *corev1.S
 		case v1alpha1.CloudProviderAzure:
 			if autoIndexer.Spec.Credentials.WorkloadIdentityRef.AzureWorkloadIdentityRef != nil {
 				sa.Annotations = map[string]string{
-					"azure.workload.identity/client-id": autoIndexer.Spec.Credentials.WorkloadIdentityRef.AzureWorkloadIdentityRef.ClientID,
-				}
-				if autoIndexer.Spec.Credentials.WorkloadIdentityRef.AzureWorkloadIdentityRef.TenantID != "" {
-					sa.Annotations["azure.workload.identity/tenant-id"] = autoIndexer.Spec.Credentials.WorkloadIdentityRef.AzureWorkloadIdentityRef.TenantID
+					AnnotationsAzureWIClientID: autoIndexer.Spec.Credentials.WorkloadIdentityRef.AzureWorkloadIdentityRef.ClientID,
+					AnnotationsAzureWITenantID: autoIndexer.Spec.Credentials.WorkloadIdentityRef.AzureWorkloadIdentityRef.TenantID,
 				}
 			}
 		}

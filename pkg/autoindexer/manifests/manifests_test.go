@@ -716,12 +716,12 @@ func TestGenerateServiceAccountManifest(t *testing.T) {
 			t.Fatal("Expected annotations for workload identity")
 		}
 
-		if sa.Annotations["azure.workload.identity/client-id"] != clientID {
-			t.Errorf("Expected client-id annotation %s, got %s", clientID, sa.Annotations["azure.workload.identity/client-id"])
+		if sa.Annotations[AnnotationsAzureWIClientID] != clientID {
+			t.Errorf("Expected client-id annotation %s, got %s", clientID, sa.Annotations[AnnotationsAzureWIClientID])
 		}
 
-		if sa.Annotations["azure.workload.identity/tenant-id"] != tenantID {
-			t.Errorf("Expected tenant-id annotation %s, got %s", tenantID, sa.Annotations["azure.workload.identity/tenant-id"])
+		if sa.Annotations[AnnotationsAzureWITenantID] != tenantID {
+			t.Errorf("Expected tenant-id annotation %s, got %s", tenantID, sa.Annotations[AnnotationsAzureWITenantID])
 		}
 
 		// Check labels
