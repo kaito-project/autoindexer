@@ -35,12 +35,10 @@ from autoindexer.data_source_handler.static_handler import (
 )
 from autoindexer.k8s.k8s_client import AutoIndexerK8sClient
 from autoindexer.rag.rag_client import KAITORAGClient
+from autoindexer.utils.log import configure_otel_logging
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
+# Initialize OpenTelemetry logging with default configuration
+configure_otel_logging(namespace=NAMESPACE, autoindexer_name=AUTOINDEXER_NAME)
 logger = logging.getLogger(__name__)
 
 
@@ -379,9 +377,9 @@ def main():
     )
     
     args = parser.parse_args()
-    
-    # Set logging level
-    logging.getLogger().setLevel(getattr(logging, args.log_level))
+
+    # Reconfigure OpenTelemetry logging with specified log level
+    configure_otel_logging(args.log_level, use_otlp_exporter=True, namespace=NAMESPACE, autoindexer_name=AUTOINDEXER_NAME)
     
     try:
         job = AutoIndexerJob(dry_run=args.dry_run)

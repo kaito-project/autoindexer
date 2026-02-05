@@ -15,6 +15,13 @@ GitPython>=3.1.31
 gitdb>=4.0.0
 # File matching
 orgecc-file-matcher>=0.0.1
+# OpenTelemetry dependencies
+opentelemetry-api>=1.21.0
+opentelemetry-sdk>=1.21.0
+opentelemetry-exporter-otlp>=1.21.0
+opentelemetry-instrumentation-logging>=0.42b0
+opentelemetry-semantic-conventions>=0.42b0
+
 # Additional dependencies needed for tests and functionality
 pytest>=7.4.0
 pytest-cov>=4.1.0

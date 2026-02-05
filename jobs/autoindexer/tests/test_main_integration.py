@@ -536,6 +536,8 @@ class TestMainFunction:
             mock_service_class.return_value = mock_service
             
             mock_logger = Mock()
+            # Mock the handlers attribute to be an empty list to support slicing
+            mock_logger.handlers = []
             mock_get_logger.return_value = mock_logger
             
             main()
