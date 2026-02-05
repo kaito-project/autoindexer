@@ -150,16 +150,20 @@ func StartPortForward(ragEngineName, ragEngineNamespace string, localPort int) t
 		CleanupFunc: func(ctx context.Context, logger *slog.Logger, testContext *types.TestContext) error {
 			logger.Info("Stopping port forwarding to RAG Engine", "ragEngine", ragEngineName)
 			if testContext.PortForwarder != nil {
-				_, err := testContext.PortForwarder.GetPorts()
-				if err == nil {
-					testContext.PortForwarder.Close()
-				} else {
-					logger.Warn("failed to get port forwarder ports, not closing port forward", "ragEngine", ragEngineName)
-				}
+				safeClosePortForwarder(testContext.PortForwarder, logger)
 			}
 			return nil
 		},
 	}
+}
+
+func safeClosePortForwarder(pf *portforward.PortForwarder, logger *slog.Logger) {
+	defer func() {
+		if r := recover(); r != nil {
+			logger.Warn("panic while closing port forwarder", "recover", r)
+		}
+	}()
+	pf.Close()
 }
 
 func createPortForwarder(ctx context.Context, testContext *types.TestContext, namespace, podName string, localPort, podPort int) (*portforward.PortForwarder, error) {
