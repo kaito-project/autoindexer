@@ -15,6 +15,10 @@ on:
         description: "the kubernetes version for the aks cluster"
         required: false
         default: "1.32.0"
+      keep_resource_group:
+        description: "Whether to keep the resource group after tests complete (for debugging)"
+        required: false
+        default: "false"
   pull_request_target:
     types:
       - opened
@@ -111,3 +115,10 @@ jobs:
           make autoindexer-e2e-test
         env:
           CLUSTER_NAME: ${{ env.CLUSTER_NAME }}
+      
+      - name: Cleanup Resource Group
+        if: ${{ inputs.keep_resource_group != 'true' }}
+        uses: azure/CLI@v2.1.0
+        with:
+          inlineScript: |
+            az group delete --name "${{ env.CLUSTER_NAME }}" --yes --no-wait
