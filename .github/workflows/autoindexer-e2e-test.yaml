@@ -117,7 +117,7 @@ jobs:
           CLUSTER_NAME: ${{ env.CLUSTER_NAME }}
       
       - name: Cleanup Resource Group
-        if: ${{ inputs.keep_resource_group != 'true' }}
+        if: ${{ always() && inputs.keep_resource_group != 'true' }}
         uses: azure/CLI@v2.1.0
         with:
           inlineScript: |
