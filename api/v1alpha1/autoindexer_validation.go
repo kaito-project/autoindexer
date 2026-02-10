@@ -214,18 +214,18 @@ func (c *CredentialsSpec) validate() *apis.FieldError {
 			return apis.ErrMissingField("secretRef")
 		}
 	case CredentialTypeWorkloadIdentity:
-		if c.WorkloadIdentityRef == nil {
-			return apis.ErrMissingField("workloadIdentityRef")
+		if c.WorkloadIdentity == nil {
+			return apis.ErrMissingField("workloadIdentity")
 		}
-		if c.WorkloadIdentityRef.CloudProvider == "" {
+		if c.WorkloadIdentity.CloudProvider == "" {
 			return apis.ErrMissingField("cloudProvider")
 		}
 
-		switch c.WorkloadIdentityRef.CloudProvider {
+		switch c.WorkloadIdentity.CloudProvider {
 		case CloudProviderAzure:
-			return c.WorkloadIdentityRef.AzureWorkloadIdentityRef.validate()
+			return c.WorkloadIdentity.AzureWorkloadIdentity.validate()
 		default:
-			return apis.ErrInvalidValue(string(c.WorkloadIdentityRef.CloudProvider), "cloudProvider")
+			return apis.ErrInvalidValue(string(c.WorkloadIdentity.CloudProvider), "cloudProvider")
 		}
 	default:
 		return apis.ErrInvalidValue(string(c.Type), "type")
@@ -233,7 +233,7 @@ func (c *CredentialsSpec) validate() *apis.FieldError {
 	return nil
 }
 
-func (az *AzureWorkloadIdentityRef) validate() *apis.FieldError {
+func (az *AzureWorkloadIdentity) validate() *apis.FieldError {
 	if az == nil {
 		return apis.ErrMissingField("")
 	}

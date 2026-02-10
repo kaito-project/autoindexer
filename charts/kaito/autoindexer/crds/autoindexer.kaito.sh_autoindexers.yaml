@@ -88,11 +88,11 @@ spec:
                       - WorkloadIdentity
                     description: Type specifies the credential type
                     type: string
-                  workloadIdentityRef:
-                    description: Workload identity reference containing credentials
+                  workloadIdentity:
+                    description: Workload identity credentials
                     properties:
-                      azureWorkloadIdentityRef:
-                        description: AzureWorkloadIdentityRef contains Azure-specific
+                      azureWorkloadIdentity:
+                        description: AzureWorkloadIdentity contains Azure-specific
                           workload identity details
                         properties:
                           clientID:
@@ -102,8 +102,10 @@ spec:
                             description: Scope of the workload identity
                             type: string
                           serviceAccountName:
-                            description: ServiceAccountName associated with the workload
-                              identity
+                            description: |-
+                              ServiceAccountName associated with the workload identity
+                              The controller will create a Kubernetes Service Account with this name and annotate it for Azure workload identity usage
+                              If the Service Account already exists, it will be used as is, but it must have the correct annotations for Azure workload identity
                             type: string
                           tenantID:
                             description: TenantID of the workload identity

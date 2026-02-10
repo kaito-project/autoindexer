@@ -202,9 +202,9 @@ type CredentialsSpec struct {
 	// +optional
 	SecretRef *SecretKeyRef `json:"secretRef,omitempty"`
 
-	// Workload identity reference containing credentials
+	// Workload identity credentials
 	// +optional
-	WorkloadIdentityRef *WorkloadIdentityRef `json:"workloadIdentityRef,omitempty"`
+	WorkloadIdentity *WorkloadIdentity `json:"workloadIdentity,omitempty"`
 }
 
 // CredentialType defines the supported credential types
@@ -227,28 +227,30 @@ type SecretKeyRef struct {
 	Key string `json:"key"`
 }
 
-// CloudProvder defines the supported cloud providers for workload identity
+// CloudProvider defines the supported cloud providers for workload identity
 // +kubebuilder:validation:Enum=Azure
-type CloudProvder string
+type CloudProvider string
 
 const (
-	CloudProviderAzure CloudProvder = "Azure"
+	CloudProviderAzure CloudProvider = "Azure"
 )
 
-// WorkloadIdentityRef references a workload identity configuration
-type WorkloadIdentityRef struct {
+// WorkloadIdentity references a workload identity configuration
+type WorkloadIdentity struct {
 	// CloudProvider specifies the cloud provider for the workload identity
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:Enum=Azure
-	CloudProvider CloudProvder `json:"cloudProvider"`
+	CloudProvider CloudProvider `json:"cloudProvider"`
 
-	// AzureWorkloadIdentityRef contains Azure-specific workload identity details
+	// AzureWorkloadIdentity contains Azure-specific workload identity details
 	// +optional
-	AzureWorkloadIdentityRef *AzureWorkloadIdentityRef `json:"azureWorkloadIdentityRef,omitempty"`
+	AzureWorkloadIdentity *AzureWorkloadIdentity `json:"azureWorkloadIdentity,omitempty"`
 }
 
-type AzureWorkloadIdentityRef struct {
+type AzureWorkloadIdentity struct {
 	// ServiceAccountName associated with the workload identity
+	// The controller will create a Kubernetes Service Account with this name and annotate it for Azure workload identity usage
+	// If the Service Account already exists, it will be used as is, but it must have the correct annotations for Azure workload identity
 	// +kubebuilder:validation:Required
 	ServiceAccountName string `json:"serviceAccountName"`
 

@@ -233,25 +233,25 @@ func generateEnvironmentVariables(autoIndexer *v1alpha1.AutoIndexer) []corev1.En
 			// Add Azure Workload Identity environment variables
 			// These are automatically populated by the Azure Workload Identity webhook
 			// when the service account has the appropriate labels/annotations
-			if autoIndexer.Spec.Credentials.WorkloadIdentityRef != nil {
-				switch autoIndexer.Spec.Credentials.WorkloadIdentityRef.CloudProvider {
+			if autoIndexer.Spec.Credentials.WorkloadIdentity != nil {
+				switch autoIndexer.Spec.Credentials.WorkloadIdentity.CloudProvider {
 				case v1alpha1.CloudProviderAzure:
-					if autoIndexer.Spec.Credentials.WorkloadIdentityRef.AzureWorkloadIdentityRef.ClientID != "" {
+					if autoIndexer.Spec.Credentials.WorkloadIdentity.AzureWorkloadIdentity.ClientID != "" {
 						envVars = append(envVars, corev1.EnvVar{
 							Name:  "AZURE_CLIENT_ID",
-							Value: autoIndexer.Spec.Credentials.WorkloadIdentityRef.AzureWorkloadIdentityRef.ClientID,
+							Value: autoIndexer.Spec.Credentials.WorkloadIdentity.AzureWorkloadIdentity.ClientID,
 						})
 					}
-					if autoIndexer.Spec.Credentials.WorkloadIdentityRef.AzureWorkloadIdentityRef.TenantID != "" {
+					if autoIndexer.Spec.Credentials.WorkloadIdentity.AzureWorkloadIdentity.TenantID != "" {
 						envVars = append(envVars, corev1.EnvVar{
 							Name:  "AZURE_TENANT_ID",
-							Value: autoIndexer.Spec.Credentials.WorkloadIdentityRef.AzureWorkloadIdentityRef.TenantID,
+							Value: autoIndexer.Spec.Credentials.WorkloadIdentity.AzureWorkloadIdentity.TenantID,
 						})
 					}
-					if autoIndexer.Spec.Credentials.WorkloadIdentityRef.AzureWorkloadIdentityRef.Scope != "" {
+					if autoIndexer.Spec.Credentials.WorkloadIdentity.AzureWorkloadIdentity.Scope != "" {
 						envVars = append(envVars, corev1.EnvVar{
 							Name:  "AZURE_TOKEN_SCOPE",
-							Value: autoIndexer.Spec.Credentials.WorkloadIdentityRef.AzureWorkloadIdentityRef.Scope,
+							Value: autoIndexer.Spec.Credentials.WorkloadIdentity.AzureWorkloadIdentity.Scope,
 						})
 					}
 					envVars = append(envVars, corev1.EnvVar{
@@ -271,8 +271,8 @@ func generateVolumeMounts(config JobConfig) []corev1.VolumeMount {
 	volumeMounts := []corev1.VolumeMount{}
 
 	if config.AutoIndexer.Spec.Credentials != nil && config.AutoIndexer.Spec.Credentials.Type == v1alpha1.CredentialTypeWorkloadIdentity {
-		if config.AutoIndexer.Spec.Credentials.WorkloadIdentityRef != nil {
-			switch config.AutoIndexer.Spec.Credentials.WorkloadIdentityRef.CloudProvider {
+		if config.AutoIndexer.Spec.Credentials.WorkloadIdentity != nil {
+			switch config.AutoIndexer.Spec.Credentials.WorkloadIdentity.CloudProvider {
 			case v1alpha1.CloudProviderAzure:
 				// Mount the token volume for Azure Workload Identity
 				volumeMount := corev1.VolumeMount{
@@ -293,8 +293,8 @@ func generateVolumeDefinitions(config JobConfig) []corev1.Volume {
 	volumes := []corev1.Volume{}
 
 	if config.AutoIndexer.Spec.Credentials != nil && config.AutoIndexer.Spec.Credentials.Type == v1alpha1.CredentialTypeWorkloadIdentity {
-		if config.AutoIndexer.Spec.Credentials.WorkloadIdentityRef != nil {
-			switch config.AutoIndexer.Spec.Credentials.WorkloadIdentityRef.CloudProvider {
+		if config.AutoIndexer.Spec.Credentials.WorkloadIdentity != nil {
+			switch config.AutoIndexer.Spec.Credentials.WorkloadIdentity.CloudProvider {
 			case v1alpha1.CloudProviderAzure:
 				// Define the token volume for Azure Workload Identity
 				volume := corev1.Volume{
@@ -380,7 +380,7 @@ func getJobSpecAnnotations(autoIndexer *v1alpha1.AutoIndexer) map[string]string 
 	annotations := make(map[string]string)
 
 	if autoIndexer != nil && autoIndexer.Spec.Credentials != nil && autoIndexer.Spec.Credentials.Type == v1alpha1.CredentialTypeWorkloadIdentity {
-		if autoIndexer.Spec.Credentials.WorkloadIdentityRef != nil && autoIndexer.Spec.Credentials.WorkloadIdentityRef.CloudProvider == v1alpha1.CloudProviderAzure {
+		if autoIndexer.Spec.Credentials.WorkloadIdentity != nil && autoIndexer.Spec.Credentials.WorkloadIdentity.CloudProvider == v1alpha1.CloudProviderAzure {
 			annotations[AnnotationsAzureWI] = "true"
 		}
 	}
@@ -425,11 +425,11 @@ func GenerateJobName(autoIndexer *v1alpha1.AutoIndexer, jobType string) string {
 // GenerateServiceAccountName creates a unique service account name for the AutoIndexer
 func GenerateServiceAccountName(autoIndexer *v1alpha1.AutoIndexer) string {
 	if autoIndexer != nil && autoIndexer.Spec.Credentials != nil && autoIndexer.Spec.Credentials.Type == v1alpha1.CredentialTypeWorkloadIdentity {
-		if autoIndexer.Spec.Credentials.WorkloadIdentityRef != nil {
-			switch autoIndexer.Spec.Credentials.WorkloadIdentityRef.CloudProvider {
+		if autoIndexer.Spec.Credentials.WorkloadIdentity != nil {
+			switch autoIndexer.Spec.Credentials.WorkloadIdentity.CloudProvider {
 			case v1alpha1.CloudProviderAzure:
-				if autoIndexer.Spec.Credentials.WorkloadIdentityRef.AzureWorkloadIdentityRef != nil && autoIndexer.Spec.Credentials.WorkloadIdentityRef.AzureWorkloadIdentityRef.ServiceAccountName != "" {
-					return autoIndexer.Spec.Credentials.WorkloadIdentityRef.AzureWorkloadIdentityRef.ServiceAccountName
+				if autoIndexer.Spec.Credentials.WorkloadIdentity.AzureWorkloadIdentity != nil && autoIndexer.Spec.Credentials.WorkloadIdentity.AzureWorkloadIdentity.ServiceAccountName != "" {
+					return autoIndexer.Spec.Credentials.WorkloadIdentity.AzureWorkloadIdentity.ServiceAccountName
 				}
 			}
 		}
@@ -498,13 +498,13 @@ func GenerateServiceAccountManifest(autoIndexer *v1alpha1.AutoIndexer) *corev1.S
 		},
 	}
 
-	if autoIndexer.Spec.Credentials != nil && autoIndexer.Spec.Credentials.Type == v1alpha1.CredentialTypeWorkloadIdentity && autoIndexer.Spec.Credentials.WorkloadIdentityRef != nil {
-		switch autoIndexer.Spec.Credentials.WorkloadIdentityRef.CloudProvider {
+	if autoIndexer.Spec.Credentials != nil && autoIndexer.Spec.Credentials.Type == v1alpha1.CredentialTypeWorkloadIdentity && autoIndexer.Spec.Credentials.WorkloadIdentity != nil {
+		switch autoIndexer.Spec.Credentials.WorkloadIdentity.CloudProvider {
 		case v1alpha1.CloudProviderAzure:
-			if autoIndexer.Spec.Credentials.WorkloadIdentityRef.AzureWorkloadIdentityRef != nil {
+			if autoIndexer.Spec.Credentials.WorkloadIdentity.AzureWorkloadIdentity != nil {
 				sa.Annotations = map[string]string{
-					AnnotationsAzureWIClientID: autoIndexer.Spec.Credentials.WorkloadIdentityRef.AzureWorkloadIdentityRef.ClientID,
-					AnnotationsAzureWITenantID: autoIndexer.Spec.Credentials.WorkloadIdentityRef.AzureWorkloadIdentityRef.TenantID,
+					AnnotationsAzureWIClientID: autoIndexer.Spec.Credentials.WorkloadIdentity.AzureWorkloadIdentity.ClientID,
+					AnnotationsAzureWITenantID: autoIndexer.Spec.Credentials.WorkloadIdentity.AzureWorkloadIdentity.TenantID,
 				}
 			}
 		}

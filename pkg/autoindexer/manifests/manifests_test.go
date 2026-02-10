@@ -73,9 +73,9 @@ func createTestAutoIndexerWithWorkloadIdentity(name, namespace string, serviceAc
 			},
 			Credentials: &v1alpha1.CredentialsSpec{
 				Type: v1alpha1.CredentialTypeWorkloadIdentity,
-				WorkloadIdentityRef: &v1alpha1.WorkloadIdentityRef{
+				WorkloadIdentity: &v1alpha1.WorkloadIdentity{
 					CloudProvider: v1alpha1.CloudProviderAzure,
-					AzureWorkloadIdentityRef: &v1alpha1.AzureWorkloadIdentityRef{
+					AzureWorkloadIdentity: &v1alpha1.AzureWorkloadIdentity{
 						ServiceAccountName: serviceAccountName,
 						ClientID:           clientID,
 						Scope:              "https://storage.azure.com/.default",

@@ -195,7 +195,7 @@ func TestAutoIndexerReconciler_deleteAutoIndexer(t *testing.T) {
 		Build()
 
 	recorder := record.NewFakeRecorder(10)
-	
+
 	// Create mock RAG client
 	mockRAGClient := &MockRAGClientForControllerTest{}
 	mockRAGClient.On("DeleteIndex", "test-ragengine", "test-index", "default").Return(nil)
@@ -537,10 +537,10 @@ func TestAutoIndexerReconciler_HandleScheduledPhaseWithDrift(t *testing.T) {
 	}
 
 	tests := []struct {
-		name               string
-		autoIndexer        *autoindexerv1alpha1.AutoIndexer
-		expectedPhase      autoindexerv1alpha1.AutoIndexerPhase
-		shouldTransition   bool
+		name             string
+		autoIndexer      *autoindexerv1alpha1.AutoIndexer
+		expectedPhase    autoindexerv1alpha1.AutoIndexerPhase
+		shouldTransition bool
 	}{
 		{
 			name: "transition to drift remediation when drift detected and strategy is not Ignore",
@@ -773,7 +773,7 @@ func TestAutoIndexerReconciler_SetSuspendedState(t *testing.T) {
 				assert.Error(t, err)
 			} else {
 				assert.NoError(t, err)
-				
+
 				// Check that the suspend state is set correctly
 				if tt.expectedSuspended {
 					assert.NotNil(t, tt.autoIndexer.Spec.Suspend)
@@ -785,4 +785,221 @@ func TestAutoIndexerReconciler_SetSuspendedState(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestAutoIndexerReconciler_EnsureServiceAccount(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = kaitov1alpha1.AddToScheme(scheme)
+	_ = autoindexerv1alpha1.AddToScheme(scheme)
+	_ = batchv1.AddToScheme(scheme)
+	_ = corev1.AddToScheme(scheme)
+	_ = rbacv1.AddToScheme(scheme)
+
+	autoIndexer := &autoindexerv1alpha1.AutoIndexer{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-autoindexer",
+			Namespace: "default",
+			UID:       "test-uid",
+		},
+		Spec: autoindexerv1alpha1.AutoIndexerSpec{
+			RAGEngine: "test-ragengine",
+			IndexName: "test-index",
+			DataSource: autoindexerv1alpha1.DataSourceSpec{
+				Type: autoindexerv1alpha1.DataSourceTypeGit,
+				Git: &autoindexerv1alpha1.GitDataSourceSpec{
+					Repository: "https://github.com/example/repo",
+				},
+			},
+		},
+	}
+
+	tests := []struct {
+		name                   string
+		existingServiceAccount *corev1.ServiceAccount
+		expectCreate           bool
+		expectUpdate           bool
+		expectedError          bool
+	}{
+		{
+			name:                   "create new ServiceAccount when none exists",
+			existingServiceAccount: nil,
+			expectCreate:           true,
+			expectUpdate:           false,
+			expectedError:          false,
+		},
+		{
+			name: "update existing ServiceAccount missing owner reference",
+			existingServiceAccount: &corev1.ServiceAccount{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-autoindexer-job-sa",
+					Namespace: "default",
+					Labels: map[string]string{
+						"autoindexer.kaito.sh/name": "test-autoindexer",
+					},
+					// Missing owner references
+				},
+			},
+			expectCreate:  false,
+			expectUpdate:  true,
+			expectedError: false,
+		},
+		{
+			name: "update existing ServiceAccount to clear unexpected annotations",
+			existingServiceAccount: &corev1.ServiceAccount{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-autoindexer-job-sa",
+					Namespace: "default",
+					Labels: map[string]string{
+						"autoindexer.kaito.sh/name":      "test-autoindexer",
+						"autoindexer.kaito.sh/namespace": "default",
+					},
+					OwnerReferences: []metav1.OwnerReference{
+						{
+							APIVersion: "autoindexer.kaito.sh/v1alpha1",
+							Kind:       "AutoIndexer",
+							Name:       "test-autoindexer",
+							UID:        "test-uid",
+						},
+					},
+					Annotations: map[string]string{
+						"old-annotation": "old-value",
+					},
+				},
+			},
+			expectCreate:  false,
+			expectUpdate:  true,
+			expectedError: false,
+		},
+		{
+			name: "update existing ServiceAccount missing both owner reference and labels",
+			existingServiceAccount: &corev1.ServiceAccount{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-autoindexer-job-sa",
+					Namespace: "default",
+					// Missing both owner references and labels
+				},
+			},
+			expectCreate:  false,
+			expectUpdate:  true,
+			expectedError: false,
+		},
+		{
+			name: "no update needed when ServiceAccount is correct",
+			existingServiceAccount: &corev1.ServiceAccount{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-autoindexer-job-sa",
+					Namespace: "default",
+					Labels: map[string]string{
+						"autoindexer.kaito.sh/name":      "test-autoindexer",
+						"autoindexer.kaito.sh/namespace": "default",
+					},
+					OwnerReferences: []metav1.OwnerReference{
+						{
+							APIVersion: "autoindexer.kaito.sh/v1alpha1",
+							Kind:       "AutoIndexer",
+							Name:       "test-autoindexer",
+							UID:        "test-uid",
+						},
+					},
+					// No annotations for default service account
+				},
+			},
+			expectCreate:  false,
+			expectUpdate:  false,
+			expectedError: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			objects := []client.Object{autoIndexer}
+			if tt.existingServiceAccount != nil {
+				objects = append(objects, tt.existingServiceAccount)
+			}
+
+			fakeClient := fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithObjects(objects...).
+				Build()
+
+			recorder := record.NewFakeRecorder(10)
+			reconciler := &AutoIndexerReconciler{
+				Client:   fakeClient,
+				Log:      logr.Discard(),
+				Scheme:   scheme,
+				Recorder: recorder,
+			}
+
+			// Track client operations to verify create vs update behavior
+			createCalls := 0
+			updateCalls := 0
+
+			// Wrap the client to track operations
+			trackingClient := &trackingClient{
+				Client:   fakeClient,
+				onCreate: func() { createCalls++ },
+				onUpdate: func() { updateCalls++ },
+			}
+			reconciler.Client = trackingClient
+
+			ctx := context.Background()
+			err := reconciler.ensureServiceAccount(ctx, autoIndexer)
+
+			if tt.expectedError {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
+
+			if tt.expectCreate {
+				assert.Equal(t, 1, createCalls, "Expected exactly one create call")
+				assert.Equal(t, 0, updateCalls, "Expected no update calls")
+			} else if tt.expectUpdate {
+				assert.Equal(t, 0, createCalls, "Expected no create calls")
+				assert.Equal(t, 1, updateCalls, "Expected exactly one update call")
+			} else {
+				assert.Equal(t, 0, createCalls, "Expected no create calls")
+				assert.Equal(t, 0, updateCalls, "Expected no update calls")
+			}
+
+			// Verify the ServiceAccount exists with correct properties
+			serviceAccount := &corev1.ServiceAccount{}
+			err = fakeClient.Get(ctx, types.NamespacedName{
+				Name:      "test-autoindexer-job-sa",
+				Namespace: "default",
+			}, serviceAccount)
+			assert.NoError(t, err, "ServiceAccount should exist")
+
+			// Verify owner reference is set
+			assert.Len(t, serviceAccount.OwnerReferences, 1, "ServiceAccount should have owner reference")
+			assert.Equal(t, "AutoIndexer", serviceAccount.OwnerReferences[0].Kind)
+			assert.Equal(t, "test-autoindexer", serviceAccount.OwnerReferences[0].Name)
+			assert.Equal(t, types.UID("test-uid"), serviceAccount.OwnerReferences[0].UID)
+
+			// Verify labels
+			assert.Equal(t, "test-autoindexer", serviceAccount.Labels["autoindexer.kaito.sh/name"])
+			assert.Equal(t, "default", serviceAccount.Labels["autoindexer.kaito.sh/namespace"])
+		})
+	}
+}
+
+// trackingClient wraps a client.Client to track create and update operations
+type trackingClient struct {
+	client.Client
+	onCreate func()
+	onUpdate func()
+}
+
+func (c *trackingClient) Create(ctx context.Context, obj client.Object, opts ...client.CreateOption) error {
+	if c.onCreate != nil {
+		c.onCreate()
+	}
+	return c.Client.Create(ctx, obj, opts...)
+}
+
+func (c *trackingClient) Update(ctx context.Context, obj client.Object, opts ...client.UpdateOption) error {
+	if c.onUpdate != nil {
+		c.onUpdate()
+	}
+	return c.Client.Update(ctx, obj, opts...)
 }
