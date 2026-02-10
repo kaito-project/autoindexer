@@ -372,6 +372,128 @@ func TestAutoIndexer_Validate(t *testing.T) {
 		{"credentials secretref missing key", func(a *AutoIndexer) {
 			a.Spec.Credentials = &CredentialsSpec{Type: "SecretRef", SecretRef: &SecretKeyRef{Name: "foo"}}
 		}, true},
+		{"valid workloadidentity credentials", func(a *AutoIndexer) {
+			a.Spec.Credentials = &CredentialsSpec{
+				Type: "WorkloadIdentity",
+				WorkloadIdentity: &WorkloadIdentity{
+					CloudProvider: "Azure",
+					AzureWorkloadIdentity: &AzureWorkloadIdentity{
+						ServiceAccountName: "my-service-account",
+						ClientID:           "12345678-1234-1234-1234-123456789abc",
+						Scope:              "https://storage.azure.com/.default",
+						TenantID:           "87654321-4321-4321-4321-cba987654321",
+					},
+				},
+			}
+		}, false},
+		{"credentials workloadidentity missing ref", func(a *AutoIndexer) {
+			a.Spec.Credentials = &CredentialsSpec{Type: "WorkloadIdentity", WorkloadIdentity: nil}
+		}, true},
+		{"credentials workloadidentity missing cloudprovider", func(a *AutoIndexer) {
+			a.Spec.Credentials = &CredentialsSpec{
+				Type:             "WorkloadIdentity",
+				WorkloadIdentity: &WorkloadIdentity{},
+			}
+		}, true},
+		{"credentials workloadidentity invalid cloudprovider", func(a *AutoIndexer) {
+			a.Spec.Credentials = &CredentialsSpec{
+				Type: "WorkloadIdentity",
+				WorkloadIdentity: &WorkloadIdentity{
+					CloudProvider: "InvalidProvider",
+				},
+			}
+		}, true},
+		{"credentials workloadidentity missing azure ref", func(a *AutoIndexer) {
+			a.Spec.Credentials = &CredentialsSpec{
+				Type: "WorkloadIdentity",
+				WorkloadIdentity: &WorkloadIdentity{
+					CloudProvider:         "Azure",
+					AzureWorkloadIdentity: nil,
+				},
+			}
+		}, true},
+		{"credentials workloadidentity missing tenantId", func(a *AutoIndexer) {
+			a.Spec.Credentials = &CredentialsSpec{
+				Type: "WorkloadIdentity",
+				WorkloadIdentity: &WorkloadIdentity{
+					CloudProvider: "Azure",
+					AzureWorkloadIdentity: &AzureWorkloadIdentity{
+						ServiceAccountName: "my-service-account",
+						ClientID:           "12345678-1234-1234-1234-123456789abc",
+						Scope:              "https://storage.azure.com/.default",
+					},
+				},
+			}
+		}, true},
+		{"credentials workloadidentity missing scope", func(a *AutoIndexer) {
+			a.Spec.Credentials = &CredentialsSpec{
+				Type: "WorkloadIdentity",
+				WorkloadIdentity: &WorkloadIdentity{
+					CloudProvider: "Azure",
+					AzureWorkloadIdentity: &AzureWorkloadIdentity{
+						ServiceAccountName: "my-service-account",
+						ClientID:           "12345678-1234-1234-1234-123456789abc",
+						TenantID:           "87654321-4321-4321-4321-cba987654321",
+					},
+				},
+			}
+		}, true},
+		{"credentials workloadidentity missing serviceaccount", func(a *AutoIndexer) {
+			a.Spec.Credentials = &CredentialsSpec{
+				Type: "WorkloadIdentity",
+				WorkloadIdentity: &WorkloadIdentity{
+					CloudProvider: "Azure",
+					AzureWorkloadIdentity: &AzureWorkloadIdentity{
+						ClientID: "12345678-1234-1234-1234-123456789abc",
+						Scope:    "https://storage.azure.com/.default",
+						TenantID: "87654321-4321-4321-4321-cba987654321",
+					},
+				},
+			}
+		}, true},
+		{"credentials workloadidentity missing clientid", func(a *AutoIndexer) {
+			a.Spec.Credentials = &CredentialsSpec{
+				Type: "WorkloadIdentity",
+				WorkloadIdentity: &WorkloadIdentity{
+					CloudProvider: "Azure",
+					AzureWorkloadIdentity: &AzureWorkloadIdentity{
+						ServiceAccountName: "my-service-account",
+						Scope:              "https://storage.azure.com/.default",
+					},
+				},
+			}
+		}, true},
+		{"credentials workloadidentity invalid clientid", func(a *AutoIndexer) {
+			a.Spec.Credentials = &CredentialsSpec{
+				Type: "WorkloadIdentity",
+				WorkloadIdentity: &WorkloadIdentity{
+					CloudProvider: "Azure",
+					AzureWorkloadIdentity: &AzureWorkloadIdentity{
+						ServiceAccountName: "my-service-account",
+						ClientID:           "invalid-uuid",
+						Scope:              "https://storage.azure.com/.default",
+					},
+				},
+			}
+		}, true},
+		{"credentials workloadidentity invalid tenantid", func(a *AutoIndexer) {
+			invalidTenantID := "invalid-tenant-uuid"
+			a.Spec.Credentials = &CredentialsSpec{
+				Type: "WorkloadIdentity",
+				WorkloadIdentity: &WorkloadIdentity{
+					CloudProvider: "Azure",
+					AzureWorkloadIdentity: &AzureWorkloadIdentity{
+						ServiceAccountName: "my-service-account",
+						ClientID:           "12345678-1234-1234-1234-123456789abc",
+						Scope:              "https://storage.azure.com/.default",
+						TenantID:           invalidTenantID,
+					},
+				},
+			}
+		}, true},
+		{"credentials invalid type", func(a *AutoIndexer) {
+			a.Spec.Credentials = &CredentialsSpec{Type: "InvalidType"}
+		}, true},
 		{"schedule invalid", func(a *AutoIndexer) {
 			s := "bad"
 			a.Spec.Schedule = &s
@@ -456,6 +578,232 @@ func TestDatabaseDataSourceSpec_Validation(t *testing.T) {
 			}
 			if !tc.wantErr && err != nil {
 				t.Errorf("unexpected error for: %s, got %v", tc.description, err)
+			}
+		})
+	}
+}
+
+func TestCredentialsSpec_Validation(t *testing.T) {
+	testCases := []struct {
+		name        string
+		credentials *CredentialsSpec
+		wantErr     bool
+		description string
+	}{
+		{
+			name:        "nil credentials should return error in validate function",
+			credentials: nil,
+			wantErr:     true,
+			description: "Nil credentials should return error in direct validate call (but allowed in main validation)",
+		},
+		{
+			name: "valid SecretRef credentials",
+			credentials: &CredentialsSpec{
+				Type: CredentialTypeSecretRef,
+				SecretRef: &SecretKeyRef{
+					Name: "my-secret",
+					Key:  "password",
+				},
+			},
+			wantErr:     false,
+			description: "Valid SecretRef credentials should pass validation",
+		},
+		{
+			name: "valid WorkloadIdentity credentials",
+			credentials: &CredentialsSpec{
+				Type: CredentialTypeWorkloadIdentity,
+				WorkloadIdentity: &WorkloadIdentity{
+					CloudProvider: CloudProviderAzure,
+					AzureWorkloadIdentity: &AzureWorkloadIdentity{
+						ServiceAccountName: "my-service-account",
+						ClientID:           "12345678-1234-1234-1234-123456789abc",
+						Scope:              "https://storage.azure.com/.default",
+						TenantID:           "87654321-4321-4321-4321-cba987654321",
+					},
+				},
+			},
+			wantErr:     false,
+			description: "Valid WorkloadIdentity credentials should pass validation",
+		},
+		{
+			name: "missing credentials type",
+			credentials: &CredentialsSpec{
+				Type: "",
+			},
+			wantErr:     true,
+			description: "Missing credentials type should fail validation",
+		},
+		{
+			name: "invalid credentials type",
+			credentials: &CredentialsSpec{
+				Type: CredentialType("InvalidType"),
+			},
+			wantErr:     true,
+			description: "Invalid credentials type should fail validation",
+		},
+		{
+			name: "SecretRef missing secretRef field",
+			credentials: &CredentialsSpec{
+				Type:      CredentialTypeSecretRef,
+				SecretRef: nil,
+			},
+			wantErr:     true,
+			description: "SecretRef with missing secretRef field should fail validation",
+		},
+		{
+			name: "SecretRef missing name",
+			credentials: &CredentialsSpec{
+				Type: CredentialTypeSecretRef,
+				SecretRef: &SecretKeyRef{
+					Key: "password",
+				},
+			},
+			wantErr:     true,
+			description: "SecretRef with missing name should fail validation",
+		},
+		{
+			name: "SecretRef missing key",
+			credentials: &CredentialsSpec{
+				Type: CredentialTypeSecretRef,
+				SecretRef: &SecretKeyRef{
+					Name: "my-secret",
+				},
+			},
+			wantErr:     true,
+			description: "SecretRef with missing key should fail validation",
+		},
+		{
+			name: "WorkloadIdentity missing workloadIdentityRef field",
+			credentials: &CredentialsSpec{
+				Type:             CredentialTypeWorkloadIdentity,
+				WorkloadIdentity: nil,
+			},
+			wantErr:     true,
+			description: "WorkloadIdentity with missing workloadIdentity field should fail validation",
+		},
+		{
+			name: "WorkloadIdentity missing cloudProvider",
+			credentials: &CredentialsSpec{
+				Type:             CredentialTypeWorkloadIdentity,
+				WorkloadIdentity: &WorkloadIdentity{},
+			},
+			wantErr:     true,
+			description: "WorkloadIdentity with missing cloudProvider should fail validation",
+		},
+		{
+			name: "WorkloadIdentity invalid cloudProvider",
+			credentials: &CredentialsSpec{
+				Type: CredentialTypeWorkloadIdentity,
+				WorkloadIdentity: &WorkloadIdentity{
+					CloudProvider: CloudProvider("InvalidProvider"),
+				},
+			},
+			wantErr:     true,
+			description: "WorkloadIdentity with invalid cloudProvider should fail validation",
+		},
+		{
+			name: "WorkloadIdentity missing azureWorkloadIdentityRef",
+			credentials: &CredentialsSpec{
+				Type: CredentialTypeWorkloadIdentity,
+				WorkloadIdentity: &WorkloadIdentity{
+					CloudProvider:         CloudProviderAzure,
+					AzureWorkloadIdentity: nil,
+				},
+			},
+			wantErr:     true,
+			description: "WorkloadIdentity with missing azureWorkloadIdentity should fail validation",
+		},
+		{
+			name: "WorkloadIdentity missing scope",
+			credentials: &CredentialsSpec{
+				Type: CredentialTypeWorkloadIdentity,
+				WorkloadIdentity: &WorkloadIdentity{
+					CloudProvider: CloudProviderAzure,
+					AzureWorkloadIdentity: &AzureWorkloadIdentity{
+						ServiceAccountName: "my-service-account",
+						ClientID:           "12345678-1234-1234-1234-123456789abc",
+					},
+				},
+			},
+			wantErr:     true,
+			description: "WorkloadIdentity with missing scope should fail validation",
+		},
+		{
+			name: "WorkloadIdentity missing serviceAccountName",
+			credentials: &CredentialsSpec{
+				Type: CredentialTypeWorkloadIdentity,
+				WorkloadIdentity: &WorkloadIdentity{
+					CloudProvider: CloudProviderAzure,
+					AzureWorkloadIdentity: &AzureWorkloadIdentity{
+						ClientID: "12345678-1234-1234-1234-123456789abc",
+						Scope:    "https://storage.azure.com/.default",
+					},
+				},
+			},
+			wantErr:     true,
+			description: "WorkloadIdentity with missing serviceAccountName should fail validation",
+		},
+		{
+			name: "WorkloadIdentity missing clientID",
+			credentials: &CredentialsSpec{
+				Type: CredentialTypeWorkloadIdentity,
+				WorkloadIdentity: &WorkloadIdentity{
+					CloudProvider: CloudProviderAzure,
+					AzureWorkloadIdentity: &AzureWorkloadIdentity{
+						ServiceAccountName: "my-service-account",
+						Scope:              "https://storage.azure.com/.default",
+					},
+				},
+			},
+			wantErr:     true,
+			description: "WorkloadIdentity with missing clientID should fail validation",
+		},
+		{
+			name: "WorkloadIdentity invalid clientID format",
+			credentials: &CredentialsSpec{
+				Type: CredentialTypeWorkloadIdentity,
+				WorkloadIdentity: &WorkloadIdentity{
+					CloudProvider: CloudProviderAzure,
+					AzureWorkloadIdentity: &AzureWorkloadIdentity{
+						ServiceAccountName: "my-service-account",
+						ClientID:           "not-a-valid-uuid",
+						Scope:              "https://storage.azure.com/.default",
+					},
+				},
+			},
+			wantErr:     true,
+			description: "WorkloadIdentity with invalid clientID format should fail validation",
+		},
+		{
+			name: "WorkloadIdentity invalid tenantID format",
+			credentials: func() *CredentialsSpec {
+				return &CredentialsSpec{
+					Type: CredentialTypeWorkloadIdentity,
+					WorkloadIdentity: &WorkloadIdentity{
+						CloudProvider: CloudProviderAzure,
+						AzureWorkloadIdentity: &AzureWorkloadIdentity{
+							ServiceAccountName: "my-service-account",
+							ClientID:           "12345678-1234-1234-1234-123456789abc",
+							Scope:              "https://storage.azure.com/.default",
+							TenantID:           "not-a-valid-uuid",
+						},
+					},
+				}
+			}(),
+			wantErr:     true,
+			description: "WorkloadIdentity with invalid tenantID format should fail validation",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.credentials.validate()
+
+			if tc.wantErr && err == nil {
+				t.Errorf("Expected validation error for %s, but got none. Description: %s", tc.name, tc.description)
+			}
+			if !tc.wantErr && err != nil {
+				t.Errorf("Expected no validation error for %s, but got: %v. Description: %s", tc.name, err, tc.description)
 			}
 		})
 	}

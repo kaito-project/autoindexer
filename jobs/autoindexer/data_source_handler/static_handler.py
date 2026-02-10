@@ -21,6 +21,7 @@ from urllib.parse import urlparse
 import requests
 
 from autoindexer.content_handler.factory import ContentHandlerFactory
+from autoindexer.credential_provider.credential_provider import CredentialProvider
 from autoindexer.data_source_handler.handler import (
     DataSourceError,
     DataSourceHandler,
@@ -47,13 +48,13 @@ class StaticDataSourceHandler(DataSourceHandler):
     - Direct text content provided in configuration
     """
 
-    def __init__(self, index_name: str, config: dict[str, Any], rag_client: KAITORAGClient, autoindexer_client: AutoIndexerK8sClient, credentials: str | None = None):
+    def __init__(self, index_name: str, config: dict[str, Any], rag_client: KAITORAGClient, autoindexer_client: AutoIndexerK8sClient, credentials: CredentialProvider | None = None):
         """
         Initialize the static data source handler.
         
         Args:
             config: Configuration dictionary containing static data source settings
-            credentials: Optional credentials for accessing the data source
+            credentials: Optional credential provider for accessing the data source
         """
 
         self.index_name = index_name
@@ -195,7 +196,9 @@ class StaticDataSourceHandler(DataSourceHandler):
             
             # Add authentication if available
             if self.credentials:
-                headers['Authorization'] = f'Bearer {self.credentials}'
+                # Static Data Source Handler should only be able to use token without scopes (secret credentials)
+                token = self.credentials.get_token()
+                headers['Authorization'] = f'Bearer {token}'
             
             # Make request with timeout and streaming for large files
             timeout = self.config.get("timeout", 60)  # Increased timeout for file downloads

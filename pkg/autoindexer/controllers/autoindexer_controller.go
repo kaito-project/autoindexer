@@ -584,11 +584,21 @@ func (r *AutoIndexerReconciler) ensureServiceAccount(ctx context.Context, autoIn
 		return err
 	}
 
-	// Update the existing ServiceAccount if needed
+	needsUpdate := false
 	if !hasOwnerReference(existingSA, autoIndexerObj) {
-		r.Log.Info("Updating ServiceAccount", "serviceaccount", serviceAccount.Name, "namespace", serviceAccount.Namespace, "autoindexer", autoIndexerObj.Name)
+		needsUpdate = true
 		existingSA.OwnerReferences = serviceAccount.OwnerReferences
 		existingSA.Labels = serviceAccount.Labels
+	}
+
+	if !reflect.DeepEqual(existingSA.Annotations, serviceAccount.Annotations) {
+		needsUpdate = true
+		existingSA.Annotations = serviceAccount.Annotations
+	}
+
+	// Update the existing ServiceAccount if needed
+	if needsUpdate {
+		r.Log.Info("Updating ServiceAccount", "serviceaccount", serviceAccount.Name, "namespace", serviceAccount.Namespace, "autoindexer", autoIndexerObj.Name)
 		return r.Update(ctx, existingSA)
 	}
 

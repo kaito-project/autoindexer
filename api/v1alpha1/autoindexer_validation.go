@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"regexp"
 
+	"github.com/google/uuid"
 	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 	"k8s.io/klog/v2"
 	"knative.dev/pkg/apis"
@@ -72,11 +73,8 @@ func (a *AutoIndexer) validateCreate() (errs *apis.FieldError) {
 	}
 	// Validate Credentials if present
 	if a.Spec.Credentials != nil {
-		if a.Spec.Credentials.Type == "" {
-			errs = errs.Also(apis.ErrMissingField("credentials.type"))
-		}
-		if a.Spec.Credentials.Type == "SecretRef" && (a.Spec.Credentials.SecretRef == nil || a.Spec.Credentials.SecretRef.Name == "" || a.Spec.Credentials.SecretRef.Key == "") {
-			errs = errs.Also(apis.ErrMissingField("credentials.secretRef"))
+		if err := a.Spec.Credentials.validate(); err != nil {
+			errs = errs.Also(err.ViaField("credentials"))
 		}
 	}
 	// Validate Schedule pattern if present
@@ -200,6 +198,63 @@ func (d *DatabaseDataSourceSpec) validate() *apis.FieldError {
 		return apis.ErrMissingField("initialQuery")
 	}
 
+	return nil
+}
+
+func (c *CredentialsSpec) validate() *apis.FieldError {
+	if c == nil {
+		return apis.ErrMissingField("")
+	}
+	if c.Type == "" {
+		return apis.ErrMissingField("type")
+	}
+	switch c.Type {
+	case CredentialTypeSecretRef:
+		if c.SecretRef == nil || c.SecretRef.Name == "" || c.SecretRef.Key == "" {
+			return apis.ErrMissingField("secretRef")
+		}
+	case CredentialTypeWorkloadIdentity:
+		if c.WorkloadIdentity == nil {
+			return apis.ErrMissingField("workloadIdentity")
+		}
+		if c.WorkloadIdentity.CloudProvider == "" {
+			return apis.ErrMissingField("cloudProvider")
+		}
+
+		switch c.WorkloadIdentity.CloudProvider {
+		case CloudProviderAzure:
+			return c.WorkloadIdentity.AzureWorkloadIdentity.validate()
+		default:
+			return apis.ErrInvalidValue(string(c.WorkloadIdentity.CloudProvider), "cloudProvider")
+		}
+	default:
+		return apis.ErrInvalidValue(string(c.Type), "type")
+	}
+	return nil
+}
+
+func (az *AzureWorkloadIdentity) validate() *apis.FieldError {
+	if az == nil {
+		return apis.ErrMissingField("")
+	}
+	if az.ClientID == "" {
+		return apis.ErrMissingField("clientID")
+	}
+	if az.TenantID == "" {
+		return apis.ErrMissingField("tenantID")
+	}
+	if az.ServiceAccountName == "" {
+		return apis.ErrMissingField("serviceAccountName")
+	}
+	if az.Scope == "" {
+		return apis.ErrMissingField("scope")
+	}
+	if _, err := uuid.Parse(az.ClientID); err != nil {
+		return apis.ErrInvalidValue(az.ClientID, "clientID")
+	}
+	if _, err := uuid.Parse(az.TenantID); err != nil {
+		return apis.ErrInvalidValue(az.TenantID, "tenantID")
+	}
 	return nil
 }
 

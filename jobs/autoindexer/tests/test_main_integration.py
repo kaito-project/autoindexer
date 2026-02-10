@@ -131,7 +131,7 @@ class TestAutoIndexerJob:
                     config=expected_config, 
                     rag_client=mock_rag_client.return_value,
                     autoindexer_client=mock_k8s_client,
-                    credentials="test-secret"
+                    credentials=None
                 )
                 assert hasattr(service, 'data_source_handler')
                 assert service.data_source_handler == mock_static_handler.return_value

@@ -54,6 +54,39 @@ func createTestAutoIndexer(name, namespace string, schedule *string) *v1alpha1.A
 	}
 }
 
+func createTestAutoIndexerWithWorkloadIdentity(name, namespace string, serviceAccountName, clientID string, tenantID *string) *v1alpha1.AutoIndexer {
+	return &v1alpha1.AutoIndexer{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: namespace,
+		},
+		Spec: v1alpha1.AutoIndexerSpec{
+			RAGEngine: "test-ragengine",
+			IndexName: "test-index",
+			DataSource: v1alpha1.DataSourceSpec{
+				Type: v1alpha1.DataSourceTypeGit,
+				Git: &v1alpha1.GitDataSourceSpec{
+					Repository: "https://github.com/example/test-repo",
+					Branch:     "main",
+					Paths:      []string{"docs/"},
+				},
+			},
+			Credentials: &v1alpha1.CredentialsSpec{
+				Type: v1alpha1.CredentialTypeWorkloadIdentity,
+				WorkloadIdentity: &v1alpha1.WorkloadIdentity{
+					CloudProvider: v1alpha1.CloudProviderAzure,
+					AzureWorkloadIdentity: &v1alpha1.AzureWorkloadIdentity{
+						ServiceAccountName: serviceAccountName,
+						ClientID:           clientID,
+						Scope:              "https://storage.azure.com/.default",
+						TenantID:           *tenantID,
+					},
+				},
+			},
+		},
+	}
+}
+
 func TestGenerateIndexingJobManifest(t *testing.T) {
 	autoIndexer := createTestAutoIndexer("test-autoindexer", "default", nil)
 
@@ -144,6 +177,46 @@ func TestGenerateIndexingJobManifest(t *testing.T) {
 	}
 	if !found {
 		t.Error("Expected ACCESS_SECRET environment variable with correct SecretRef not found")
+	}
+}
+
+func TestGenerateIndexingJobManifestWithWorkloadIdentity(t *testing.T) {
+	clientID := "12345678-1234-1234-1234-123456789abc"
+	tenantID := "87654321-4321-4321-4321-cba987654321"
+	autoIndexer := createTestAutoIndexerWithWorkloadIdentity("test-wi", "default", "my-workload-sa", clientID, &tenantID)
+
+	config := GetDefaultJobConfig(autoIndexer, JobTypeOneTime)
+	job := GenerateIndexingJobManifest(config)
+
+	// Validate service account is set correctly
+	if job.Spec.Template.Spec.ServiceAccountName != "my-workload-sa" {
+		t.Errorf("Expected service account name 'my-workload-sa', got %s", job.Spec.Template.Spec.ServiceAccountName)
+	}
+
+	// Validate that ACCESS_SECRET is not set for workload identity
+	container := job.Spec.Template.Spec.Containers[0]
+	for _, env := range container.Env {
+		if env.Name == EnvAccessSecret {
+			t.Error("ACCESS_SECRET should not be present for workload identity credentials")
+		}
+	}
+
+	// Validate basic environment variables are still present
+	envVarExists := func(name string) bool {
+		for _, env := range container.Env {
+			if env.Name == name {
+				return true
+			}
+		}
+		return false
+	}
+
+	if !envVarExists(EnvNamespace) {
+		t.Error("Expected NAMESPACE environment variable")
+	}
+
+	if !envVarExists(EnvAutoIndexerName) {
+		t.Error("Expected AUTOINDEXER_NAME environment variable")
 	}
 }
 
@@ -368,6 +441,39 @@ func TestGenerateEnvironmentVariables(t *testing.T) {
 	}
 }
 
+func TestGenerateEnvironmentVariablesWorkloadIdentity(t *testing.T) {
+	clientID := "12345678-1234-1234-1234-123456789abc"
+	tenantID := "87654321-4321-4321-4321-cba987654321"
+	autoIndexer := createTestAutoIndexerWithWorkloadIdentity("test-wi", "default", "my-workload-sa", clientID, &tenantID)
+
+	envVars := generateEnvironmentVariables(autoIndexer)
+
+	// Check that required environment variables are present
+	envMap := make(map[string]string)
+	var hasAccessSecret bool
+	for _, env := range envVars {
+		if env.Value != "" {
+			envMap[env.Name] = env.Value
+		}
+		if env.Name == EnvAccessSecret {
+			hasAccessSecret = true
+		}
+	}
+
+	if envMap[EnvNamespace] != autoIndexer.Namespace {
+		t.Errorf("Expected namespace %s, got %s", autoIndexer.Namespace, envMap[EnvNamespace])
+	}
+
+	if envMap[EnvAutoIndexerName] != autoIndexer.Name {
+		t.Errorf("Expected autoindexer name %s, got %s", autoIndexer.Name, envMap[EnvAutoIndexerName])
+	}
+
+	// ACCESS_SECRET should NOT be present for workload identity
+	if hasAccessSecret {
+		t.Error("ACCESS_SECRET should not be present for workload identity credentials")
+	}
+}
+
 func TestGenerateRAGEngineEndpoint(t *testing.T) {
 	autoIndexer := createTestAutoIndexer("test", "default", nil)
 
@@ -522,14 +628,28 @@ func TestGenerateSpecHash(t *testing.T) {
 }
 
 func TestGenerateServiceAccountName(t *testing.T) {
-	autoIndexer := createTestAutoIndexer("test-ai", "default", nil)
+	t.Run("default service account name", func(t *testing.T) {
+		autoIndexer := createTestAutoIndexer("test-ai", "default", nil)
 
-	name := GenerateServiceAccountName(autoIndexer)
+		name := GenerateServiceAccountName(autoIndexer)
 
-	expectedName := "test-ai-job-sa"
-	if name != expectedName {
-		t.Errorf("Expected name %s, got %s", expectedName, name)
-	}
+		expectedName := "test-ai-job-sa"
+		if name != expectedName {
+			t.Errorf("Expected name %s, got %s", expectedName, name)
+		}
+	})
+
+	t.Run("workload identity service account name", func(t *testing.T) {
+		tenantID := "87654321-4321-4321-4321-cba987654321"
+		autoIndexer := createTestAutoIndexerWithWorkloadIdentity("test-ai", "default", "my-workload-sa", "12345678-1234-1234-1234-123456789abc", &tenantID)
+
+		name := GenerateServiceAccountName(autoIndexer)
+
+		expectedName := "my-workload-sa"
+		if name != expectedName {
+			t.Errorf("Expected workload identity service account name %s, got %s", expectedName, name)
+		}
+	})
 }
 
 func TestGenerateRoleName(t *testing.T) {
@@ -555,22 +675,60 @@ func TestGenerateRoleBindingName(t *testing.T) {
 }
 
 func TestGenerateServiceAccountManifest(t *testing.T) {
-	autoIndexer := createTestAutoIndexer("test", "default", nil)
+	t.Run("default service account manifest", func(t *testing.T) {
+		autoIndexer := createTestAutoIndexer("test", "default", nil)
 
-	sa := GenerateServiceAccountManifest(autoIndexer)
+		sa := GenerateServiceAccountManifest(autoIndexer)
 
-	if sa.Name == "" {
-		t.Error("ServiceAccount name should not be empty")
-	}
+		if sa.Name == "" {
+			t.Error("ServiceAccount name should not be empty")
+		}
 
-	if sa.Namespace != autoIndexer.Namespace {
-		t.Errorf("Expected namespace %s, got %s", autoIndexer.Namespace, sa.Namespace)
-	}
+		if sa.Namespace != autoIndexer.Namespace {
+			t.Errorf("Expected namespace %s, got %s", autoIndexer.Namespace, sa.Namespace)
+		}
 
-	// Check labels
-	if sa.Labels[LabelAutoIndexerName] != autoIndexer.Name {
-		t.Errorf("Expected label %s=%s", LabelAutoIndexerName, autoIndexer.Name)
-	}
+		// Check labels
+		if sa.Labels[LabelAutoIndexerName] != autoIndexer.Name {
+			t.Errorf("Expected label %s=%s", LabelAutoIndexerName, autoIndexer.Name)
+		}
+
+		// Should not have workload identity annotations
+		if len(sa.Annotations) > 0 {
+			t.Error("Default service account should not have annotations")
+		}
+	})
+
+	t.Run("workload identity service account manifest with tenant ID", func(t *testing.T) {
+		clientID := "12345678-1234-1234-1234-123456789abc"
+		tenantID := "87654321-4321-4321-4321-cba987654321"
+		autoIndexer := createTestAutoIndexerWithWorkloadIdentity("test-wi", "default", "my-workload-sa", clientID, &tenantID)
+
+		sa := GenerateServiceAccountManifest(autoIndexer)
+
+		expectedName := "my-workload-sa"
+		if sa.Name != expectedName {
+			t.Errorf("Expected service account name %s, got %s", expectedName, sa.Name)
+		}
+
+		// Check workload identity annotations
+		if sa.Annotations == nil {
+			t.Fatal("Expected annotations for workload identity")
+		}
+
+		if sa.Annotations[AnnotationsAzureWIClientID] != clientID {
+			t.Errorf("Expected client-id annotation %s, got %s", clientID, sa.Annotations[AnnotationsAzureWIClientID])
+		}
+
+		if sa.Annotations[AnnotationsAzureWITenantID] != tenantID {
+			t.Errorf("Expected tenant-id annotation %s, got %s", tenantID, sa.Annotations[AnnotationsAzureWITenantID])
+		}
+
+		// Check labels
+		if sa.Labels[LabelAutoIndexerName] != autoIndexer.Name {
+			t.Errorf("Expected label %s=%s", LabelAutoIndexerName, autoIndexer.Name)
+		}
+	})
 }
 
 func TestGenerateRoleManifest(t *testing.T) {
@@ -594,32 +752,6 @@ func TestGenerateRoleManifest(t *testing.T) {
 	// Check labels
 	if role.Labels[LabelAutoIndexerName] != autoIndexer.Name {
 		t.Errorf("Expected label %s=%s", LabelAutoIndexerName, autoIndexer.Name)
-	}
-}
-
-func TestAddCredentialsMounts(t *testing.T) {
-	autoIndexer := createTestAutoIndexer("test", "default", nil)
-	config := GetDefaultJobConfig(autoIndexer, JobTypeOneTime)
-	job := GenerateIndexingJobManifest(config)
-
-	// Count volumes and volume mounts before
-	volumesBefore := len(job.Spec.Template.Spec.Volumes)
-	mountsBefore := len(job.Spec.Template.Spec.Containers[0].VolumeMounts)
-
-	// Add credentials
-	addCredentialsMounts(job, autoIndexer.Spec.Credentials)
-
-	// Count volumes and volume mounts after
-	volumesAfter := len(job.Spec.Template.Spec.Volumes)
-	mountsAfter := len(job.Spec.Template.Spec.Containers[0].VolumeMounts)
-
-	// Should have added volume and mount
-	if volumesAfter <= volumesBefore {
-		t.Error("Should have added a volume for credentials")
-	}
-
-	if mountsAfter <= mountsBefore {
-		t.Error("Should have added a volume mount for credentials")
 	}
 }
 

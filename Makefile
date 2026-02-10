@@ -124,3 +124,5 @@ az-patch-install-autoindexer-helm-e2e: ## Install Kaito AutoIndexer Helm chart f
 az-uninstall-autoindexer-helm: ## Uninstall Kaito AutoIndexer Helm chart from Azure AKS cluster.
 	az aks get-credentials --name $(AZURE_CLUSTER_NAME) --resource-group $(AZURE_RESOURCE_GROUP)
 	helm uninstall kaito-autoindexer --namespace $(KAITO_AUTOINDEXER_NAMESPACE)
+	kubectl delete namespace $(KAITO_AUTOINDEXER_NAMESPACE) || true
+	kubectl delete customresourcedefinition autoindexers.autoindexer.kaito.sh || true

@@ -1,0 +1,41 @@
+apiVersion: autoindexer.kaito.sh/v1alpha1
+kind: AutoIndexer
+metadata:
+  name: kusto-workload-identity-example
+  namespace: default
+spec:
+  ragEngine: my-rag-engine
+  indexName: kusto-index
+  
+  # Schedule for periodic indexing
+  schedule: "0 * * * *"  # Every hour
+  
+  # Azure Workload Identity credentials
+  credentials:
+    type: WorkloadIdentity
+    workloadIdentityRef:
+      serviceAccountName: autoindexer-kusto-workload-identity-example-sa
+      clientID: "00000000-0000-0000-0000-000000000000"  # Replace with your Azure AD app client ID
+      tenantID: "00000000-0000-0000-0000-000000000000"  # Replace with your Azure AD tenant ID (optional)
+  
+  # Kusto database data source
+  dataSource:
+    type: Database
+    database:
+      language: Kusto
+      
+      # Initial query for first run (full data load)
+      initialQuery: |
+        cluster('https://your-cluster.kusto.windows.net').database('YourDatabase')
+        | YourTable
+        | where Timestamp > ago(30d)
+        | project Id, Title, Content, Timestamp
+        | take 10000
+      
+      # Incremental query for subsequent runs
+      # $LAST_INDEXING_TIMESTAMP will be automatically replaced with the last indexing time
+      incrementalQuery: |
+        cluster('https://your-cluster.kusto.windows.net').database('YourDatabase')
+        | YourTable
+        | where Timestamp > datetime($LAST_INDEXING_TIMESTAMP)
+        | project Id, Title, Content, Timestamp

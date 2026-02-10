@@ -45,6 +45,11 @@ const (
 	LabelJobType              = "autoindexer.kaito.sh/job-type"
 	LabelDataSourceType       = "autoindexer.kaito.sh/datasource-type"
 
+	AnnotationsSpecHash        = "autoindexer.kaito.sh/spec-hash"
+	AnnotationsAzureWI         = "azure.workload.identity/use"
+	AnnotationsAzureWIClientID = "azure.workload.identity/client-id"
+	AnnotationsAzureWITenantID = "azure.workload.identity/tenant-id"
+
 	// Job type values
 	JobTypeOneTime   = "one-time"
 	JobTypeScheduled = "scheduled"
@@ -101,7 +106,7 @@ func GenerateIndexingJobManifest(config JobConfig) *batchv1.Job {
 			Namespace: config.AutoIndexer.Namespace,
 			Labels:    labels,
 			Annotations: map[string]string{
-				"autoindexer.kaito.sh/spec-hash": generateSpecHash(config.AutoIndexer.Spec),
+				AnnotationsSpecHash: generateSpecHash(config.AutoIndexer.Spec),
 			},
 			OwnerReferences: []metav1.OwnerReference{
 				*metav1.NewControllerRef(config.AutoIndexer, v1alpha1.GroupVersion.WithKind("AutoIndexer")),
@@ -110,7 +115,8 @@ func GenerateIndexingJobManifest(config JobConfig) *batchv1.Job {
 		Spec: batchv1.JobSpec{
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
-					Labels: labels,
+					Labels:      labels,
+					Annotations: getJobSpecAnnotations(config.AutoIndexer),
 				},
 				Spec: corev1.PodSpec{
 					RestartPolicy: corev1.RestartPolicyOnFailure,
@@ -118,6 +124,7 @@ func GenerateIndexingJobManifest(config JobConfig) *batchv1.Job {
 						generateIndexingContainer(config),
 					},
 					ServiceAccountName: config.ServiceAccountName,
+					Volumes:            generateVolumeDefinitions(config),
 				},
 			},
 		},
@@ -148,7 +155,7 @@ func GenerateIndexingCronJobManifest(config JobConfig) *batchv1.CronJob {
 			Namespace: config.AutoIndexer.Namespace,
 			Labels:    labels,
 			Annotations: map[string]string{
-				"autoindexer.kaito.sh/spec-hash": generateSpecHash(config.AutoIndexer.Spec),
+				AnnotationsSpecHash: generateSpecHash(config.AutoIndexer.Spec),
 			},
 			OwnerReferences: []metav1.OwnerReference{
 				*metav1.NewControllerRef(config.AutoIndexer, v1alpha1.GroupVersion.WithKind("AutoIndexer")),
@@ -187,6 +194,7 @@ func generateIndexingContainer(config JobConfig) corev1.Container {
 		Env:             generateEnvironmentVariables(config.AutoIndexer),
 		Command:         []string{"python"},
 		Args:            []string{"main.py", "--mode=index"},
+		VolumeMounts:    generateVolumeMounts(config),
 	}
 
 	return container
@@ -208,7 +216,8 @@ func generateEnvironmentVariables(autoIndexer *v1alpha1.AutoIndexer) []corev1.En
 
 	// Add credentials configuration if present
 	if autoIndexer.Spec.Credentials != nil {
-		if autoIndexer.Spec.Credentials.Type == v1alpha1.CredentialTypeSecretRef {
+		switch autoIndexer.Spec.Credentials.Type {
+		case v1alpha1.CredentialTypeSecretRef:
 			envVars = append(envVars, corev1.EnvVar{
 				Name: EnvAccessSecret,
 				ValueFrom: &corev1.EnvVarSource{
@@ -220,37 +229,96 @@ func generateEnvironmentVariables(autoIndexer *v1alpha1.AutoIndexer) []corev1.En
 					},
 				},
 			})
+		case v1alpha1.CredentialTypeWorkloadIdentity:
+			// Add Azure Workload Identity environment variables
+			// These are automatically populated by the Azure Workload Identity webhook
+			// when the service account has the appropriate labels/annotations
+			if autoIndexer.Spec.Credentials.WorkloadIdentity != nil {
+				switch autoIndexer.Spec.Credentials.WorkloadIdentity.CloudProvider {
+				case v1alpha1.CloudProviderAzure:
+					if autoIndexer.Spec.Credentials.WorkloadIdentity.AzureWorkloadIdentity.ClientID != "" {
+						envVars = append(envVars, corev1.EnvVar{
+							Name:  "AZURE_CLIENT_ID",
+							Value: autoIndexer.Spec.Credentials.WorkloadIdentity.AzureWorkloadIdentity.ClientID,
+						})
+					}
+					if autoIndexer.Spec.Credentials.WorkloadIdentity.AzureWorkloadIdentity.TenantID != "" {
+						envVars = append(envVars, corev1.EnvVar{
+							Name:  "AZURE_TENANT_ID",
+							Value: autoIndexer.Spec.Credentials.WorkloadIdentity.AzureWorkloadIdentity.TenantID,
+						})
+					}
+					if autoIndexer.Spec.Credentials.WorkloadIdentity.AzureWorkloadIdentity.Scope != "" {
+						envVars = append(envVars, corev1.EnvVar{
+							Name:  "AZURE_TOKEN_SCOPE",
+							Value: autoIndexer.Spec.Credentials.WorkloadIdentity.AzureWorkloadIdentity.Scope,
+						})
+					}
+					envVars = append(envVars, corev1.EnvVar{
+						Name:  "AZURE_FEDERATED_TOKEN_FILE",
+						Value: "/var/run/secrets/azure/tokens/identity/token",
+					})
+				}
+			}
 		}
-	}
-
-	// Add Azure Access Token for Database data source with Kusto language
-	if autoIndexer.Spec.DataSource.Type == v1alpha1.DataSourceTypeDatabase &&
-		autoIndexer.Spec.DataSource.Database != nil &&
-		autoIndexer.Spec.DataSource.Database.Language == "Kusto" {
-		// Check if there's a Secret for database credentials
-		// Convention: <autoindexer-name>-kusto-sp or use credentials.secretRef
-		secretName := fmt.Sprintf("%s-kusto-sp", autoIndexer.Name)
-		if autoIndexer.Spec.Credentials != nil && autoIndexer.Spec.Credentials.SecretRef != nil {
-			secretName = autoIndexer.Spec.Credentials.SecretRef.Name
-		}
-
-		envVars = append(envVars,
-			corev1.EnvVar{
-				Name: "AZURE_ACCESS_TOKEN",
-				ValueFrom: &corev1.EnvVarSource{
-					SecretKeyRef: &corev1.SecretKeySelector{
-						LocalObjectReference: corev1.LocalObjectReference{
-							Name: secretName,
-						},
-						Key:      "AZURE_ACCESS_TOKEN",
-						Optional: ptr.To(false), // Required for Kusto authentication
-					},
-				},
-			},
-		)
 	}
 
 	return envVars
+}
+
+// generateVolumeMounts creates volume mounts for the indexing container
+func generateVolumeMounts(config JobConfig) []corev1.VolumeMount {
+	volumeMounts := []corev1.VolumeMount{}
+
+	if config.AutoIndexer.Spec.Credentials != nil && config.AutoIndexer.Spec.Credentials.Type == v1alpha1.CredentialTypeWorkloadIdentity {
+		if config.AutoIndexer.Spec.Credentials.WorkloadIdentity != nil {
+			switch config.AutoIndexer.Spec.Credentials.WorkloadIdentity.CloudProvider {
+			case v1alpha1.CloudProviderAzure:
+				// Mount the token volume for Azure Workload Identity
+				volumeMount := corev1.VolumeMount{
+					Name:      "azure-identity-token",
+					MountPath: "/var/run/secrets/azure/tokens",
+					ReadOnly:  true,
+				}
+				volumeMounts = append(volumeMounts, volumeMount)
+			}
+		}
+	}
+
+	return volumeMounts
+}
+
+// generateVolumeDefinitions creates volume definitions
+func generateVolumeDefinitions(config JobConfig) []corev1.Volume {
+	volumes := []corev1.Volume{}
+
+	if config.AutoIndexer.Spec.Credentials != nil && config.AutoIndexer.Spec.Credentials.Type == v1alpha1.CredentialTypeWorkloadIdentity {
+		if config.AutoIndexer.Spec.Credentials.WorkloadIdentity != nil {
+			switch config.AutoIndexer.Spec.Credentials.WorkloadIdentity.CloudProvider {
+			case v1alpha1.CloudProviderAzure:
+				// Define the token volume for Azure Workload Identity
+				volume := corev1.Volume{
+					Name: "azure-identity-token",
+					VolumeSource: corev1.VolumeSource{
+						Projected: &corev1.ProjectedVolumeSource{
+							Sources: []corev1.VolumeProjection{
+								{
+									ServiceAccountToken: &corev1.ServiceAccountTokenProjection{
+										Audience:          "api://AzureADTokenExchange",
+										ExpirationSeconds: ptr.To[int64](3600),
+										Path:              "identity/token",
+									},
+								},
+							},
+						},
+					},
+				}
+				volumes = append(volumes, volume)
+			}
+		}
+	}
+
+	return volumes
 }
 
 // generateRAGEngineEndpoint creates the RAGEngine service endpoint URL
@@ -307,6 +375,19 @@ func getJobLabels(autoIndexer *v1alpha1.AutoIndexer) map[string]string {
 	}
 }
 
+// getJobSpecAnnotations returns annotations for the job spec
+func getJobSpecAnnotations(autoIndexer *v1alpha1.AutoIndexer) map[string]string {
+	annotations := make(map[string]string)
+
+	if autoIndexer != nil && autoIndexer.Spec.Credentials != nil && autoIndexer.Spec.Credentials.Type == v1alpha1.CredentialTypeWorkloadIdentity {
+		if autoIndexer.Spec.Credentials.WorkloadIdentity != nil && autoIndexer.Spec.Credentials.WorkloadIdentity.CloudProvider == v1alpha1.CloudProviderAzure {
+			annotations[AnnotationsAzureWI] = "true"
+		}
+	}
+
+	return annotations
+}
+
 // getResourceRequirements returns resource requirements with defaults
 func getResourceRequirements(limits *corev1.ResourceRequirements) corev1.ResourceRequirements {
 	if limits != nil {
@@ -318,53 +399,6 @@ func getResourceRequirements(limits *corev1.ResourceRequirements) corev1.Resourc
 			corev1.ResourceCPU:    resource.MustParse(DefaultCPURequest),
 			corev1.ResourceMemory: resource.MustParse(DefaultMemoryRequest),
 		},
-	}
-}
-
-// addCredentialsMounts adds volume mounts for credentials
-func addCredentialsMounts(job *batchv1.Job, credentials *v1alpha1.CredentialsSpec) {
-	if credentials.SecretRef == nil {
-		return
-	}
-
-	volumeName := "credentials"
-	mountPath := "/etc/credentials"
-
-	// Add volume
-	job.Spec.Template.Spec.Volumes = append(job.Spec.Template.Spec.Volumes, corev1.Volume{
-		Name: volumeName,
-		VolumeSource: corev1.VolumeSource{
-			Secret: &corev1.SecretVolumeSource{
-				SecretName: credentials.SecretRef.Name,
-				Items: []corev1.KeyToPath{
-					{
-						Key:  credentials.SecretRef.Key,
-						Path: "credentials",
-					},
-				},
-			},
-		},
-	})
-
-	// Add volume mount to container
-	if len(job.Spec.Template.Spec.Containers) > 0 {
-		job.Spec.Template.Spec.Containers[0].VolumeMounts = append(
-			job.Spec.Template.Spec.Containers[0].VolumeMounts,
-			corev1.VolumeMount{
-				Name:      volumeName,
-				MountPath: mountPath,
-				ReadOnly:  true,
-			},
-		)
-
-		// Add environment variable pointing to the credential file
-		job.Spec.Template.Spec.Containers[0].Env = append(
-			job.Spec.Template.Spec.Containers[0].Env,
-			corev1.EnvVar{
-				Name:  "CREDENTIALS_FILE",
-				Value: fmt.Sprintf("%s/credentials", mountPath),
-			},
-		)
 	}
 }
 
@@ -390,6 +424,16 @@ func GenerateJobName(autoIndexer *v1alpha1.AutoIndexer, jobType string) string {
 
 // GenerateServiceAccountName creates a unique service account name for the AutoIndexer
 func GenerateServiceAccountName(autoIndexer *v1alpha1.AutoIndexer) string {
+	if autoIndexer != nil && autoIndexer.Spec.Credentials != nil && autoIndexer.Spec.Credentials.Type == v1alpha1.CredentialTypeWorkloadIdentity {
+		if autoIndexer.Spec.Credentials.WorkloadIdentity != nil {
+			switch autoIndexer.Spec.Credentials.WorkloadIdentity.CloudProvider {
+			case v1alpha1.CloudProviderAzure:
+				if autoIndexer.Spec.Credentials.WorkloadIdentity.AzureWorkloadIdentity != nil && autoIndexer.Spec.Credentials.WorkloadIdentity.AzureWorkloadIdentity.ServiceAccountName != "" {
+					return autoIndexer.Spec.Credentials.WorkloadIdentity.AzureWorkloadIdentity.ServiceAccountName
+				}
+			}
+		}
+	}
 	return fmt.Sprintf("%s-job-sa", autoIndexer.Name)
 }
 
@@ -440,7 +484,7 @@ func GetDefaultJobConfig(autoIndexer *v1alpha1.AutoIndexer, jobType string) JobC
 
 // GenerateServiceAccountManifest creates a ServiceAccount for AutoIndexer jobs
 func GenerateServiceAccountManifest(autoIndexer *v1alpha1.AutoIndexer) *corev1.ServiceAccount {
-	return &corev1.ServiceAccount{
+	sa := &corev1.ServiceAccount{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      GenerateServiceAccountName(autoIndexer),
 			Namespace: autoIndexer.Namespace,
@@ -453,6 +497,20 @@ func GenerateServiceAccountManifest(autoIndexer *v1alpha1.AutoIndexer) *corev1.S
 			},
 		},
 	}
+
+	if autoIndexer.Spec.Credentials != nil && autoIndexer.Spec.Credentials.Type == v1alpha1.CredentialTypeWorkloadIdentity && autoIndexer.Spec.Credentials.WorkloadIdentity != nil {
+		switch autoIndexer.Spec.Credentials.WorkloadIdentity.CloudProvider {
+		case v1alpha1.CloudProviderAzure:
+			if autoIndexer.Spec.Credentials.WorkloadIdentity.AzureWorkloadIdentity != nil {
+				sa.Annotations = map[string]string{
+					AnnotationsAzureWIClientID: autoIndexer.Spec.Credentials.WorkloadIdentity.AzureWorkloadIdentity.ClientID,
+					AnnotationsAzureWITenantID: autoIndexer.Spec.Credentials.WorkloadIdentity.AzureWorkloadIdentity.TenantID,
+				}
+			}
+		}
+	}
+
+	return sa
 }
 
 // GenerateRoleManifest creates a Role for AutoIndexer jobs to access the CR
