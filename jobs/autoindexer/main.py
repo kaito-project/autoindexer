@@ -299,11 +299,13 @@ class AutoIndexerJob:
                 logger.error(f"Indexing completed with errors: {errors}")
                 self._update_status_condition("AutoIndexerError", "True", "IndexingErrors", f"Indexing completed with {len(errors)} errors")
                 self._update_indexing_completion(False, duration_seconds, document_count, None)
+                self._create_completion_event(False, document_count, duration_seconds, errors)
                 return False
             else:
                 logger.info("Indexing completed successfully")
                 self._update_status_condition("AutoIndexerIndexing", "False", "IndexingCompleted", "Document indexing process completed successfully")
                 self._update_indexing_completion(True, duration_seconds, document_count, None)
+                self._create_completion_event(True, document_count, duration_seconds, None)
                 return True
                 
         except Exception as e:
@@ -323,6 +325,7 @@ class AutoIndexerJob:
                 document_count = 0
                 
             self._update_indexing_completion(False, duration_seconds, document_count, None)
+            self._create_completion_event(False, document_count, duration_seconds, [str(e)])
             return False
 
     def _update_index(self) -> list[str]:
@@ -398,6 +401,29 @@ class AutoIndexerJob:
         else:
             status = "success" if success else "failed"
             logger.debug(f"Completion update (no K8s client): {status}, {document_count} documents, {duration_seconds}s")
+
+    def _create_completion_event(self, success: bool, document_count: int, duration_seconds: int, errors: list[str] | None = None):
+        """Create a Kubernetes event when the job completes."""
+        if self.k8s_client:
+            try:
+                if success:
+                    reason = "IndexingCompleted"
+                    message = f"AutoIndexer job completed successfully. Processed {document_count} documents in {duration_seconds} seconds."
+                    event_type = "Normal"
+                else:
+                    reason = "IndexingFailed"
+                    error_summary = f" Errors: {'; '.join(errors[:3])}" if errors else ""
+                    if errors and len(errors) > 3:
+                        error_summary += f" (and {len(errors) - 3} more)"
+                    message = f"AutoIndexer job failed after {duration_seconds} seconds. Documents indexed: {document_count}.{error_summary}"
+                    event_type = "Warning"
+                
+                self.k8s_client.create_event(reason, message, event_type)
+            except Exception as e:
+                logger.warning(f"Failed to create completion event: {e}")
+        else:
+            status = "completed" if success else "failed"
+            logger.debug(f"Event creation (no K8s client): Job {status}, {document_count} documents, {duration_seconds}s")
 
 
 def main():
