@@ -19,6 +19,7 @@ Kubernetes client for interacting with KAITO AutoIndexer CRDs.
 import logging
 from datetime import UTC, datetime
 from typing import Any
+import uuid
 
 from kubernetes import client, config
 from kubernetes.client.rest import ApiException
@@ -314,3 +315,89 @@ class AutoIndexerK8sClient:
         if autoindexer:
             return autoindexer.get("spec", {})
         return None
+
+    def create_event(self, reason: str, message: str, event_type: str = "Normal") -> bool:
+        """
+        Create a Kubernetes event related to the AutoIndexer.
+        
+        Args:
+            reason: Short reason for the event (e.g., "IndexingCompleted", "IndexingFailed")
+            message: Human-readable message describing the event
+            event_type: Type of event ("Normal" or "Warning")
+            
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        if not self.autoindexer_name:
+            logger.warning("No AutoIndexer name specified for event creation")
+            return False
+            
+        try:
+            # Get the AutoIndexer CRD to use as the involved object
+            autoindexer = self.get_autoindexer()
+            if not autoindexer:
+                logger.error(f"Cannot create event: AutoIndexer {self.namespace}/{self.autoindexer_name} not found")
+                return False
+            
+            now = datetime.now(UTC)
+            involved_object_ref = self._create_object_reference(autoindexer)
+            
+            # Create the event object with generateName for unique naming
+            event = client.CoreV1Event(
+                metadata=client.V1ObjectMeta(
+                    generate_name=f"{self.autoindexer_name}-{reason.lower()}-",
+                    namespace=self.namespace,
+                    labels={
+                        "app.kubernetes.io/name": "autoindexer",
+                        "app.kubernetes.io/component": "indexing-job",
+                        "autoindexer.kaito.sh/name": self.autoindexer_name
+                    }
+                ),
+                involved_object=involved_object_ref,
+                reason=reason,
+                message=message,
+                type=event_type,
+                source=client.V1EventSource(
+                    component="autoindexer-job"
+                ),
+                first_timestamp=now,
+                last_timestamp=now,
+                count=1
+            )
+            
+            # Create the event
+            self.core_api.create_namespaced_event(
+                namespace=self.namespace,
+                body=event
+            )
+            
+            logger.info(f"Created Kubernetes event '{reason}' for AutoIndexer {self.namespace}/{self.autoindexer_name}")
+            return True
+            
+        except ApiException as e:
+            logger.error(f"Failed to create Kubernetes event: {e}")
+            return False
+        except Exception as e:
+            logger.error(f"Unexpected error creating Kubernetes event: {e}")
+            return False
+
+    def _create_object_reference(self, autoindexer: dict[str, Any]) -> client.V1ObjectReference:
+        """
+        Create a proper object reference from AutoIndexer metadata.
+        
+        Args:
+            autoindexer: The AutoIndexer CRD object
+            
+        Returns:
+            client.V1ObjectReference: Properly constructed object reference
+        """
+        metadata = autoindexer.get("metadata", {})
+        
+        return client.V1ObjectReference(
+            api_version=f"{self.api_group}/{self.api_version}",
+            kind=self.kind,
+            name=metadata.get("name", self.autoindexer_name),
+            namespace=metadata.get("namespace", self.namespace),
+            uid=metadata.get("uid"),
+            resource_version=metadata.get("resourceVersion")
+        )
