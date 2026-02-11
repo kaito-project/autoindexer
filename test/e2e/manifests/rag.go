@@ -10,6 +10,7 @@ const (
 	DefaultTestContextWindowSize = 16000
 	DefaultTestURL               = "http://test-inference.kaito-system.svc.cluster.local/v1/chat/completions"
 	DefaultCPUInstanceType       = "Standard_D8_v4"
+	DefaultGPUInstanceType       = "Standard_NC24ads_A100_v4"
 )
 
 func CreateRAGEngineManifest(name, namespace, instanceType, embeddingModelID string, inferenceSpec *kaitov1alpha1.InferenceServiceSpec) *kaitov1alpha1.RAGEngine {
