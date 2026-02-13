@@ -424,7 +424,7 @@ def main():
     args = parser.parse_args()
 
     # Reconfigure OpenTelemetry logging with specified log level
-    configure_otel_logging(args.log_level, use_otlp_exporter=True, namespace=NAMESPACE, autoindexer_name=AUTOINDEXER_NAME)
+    configure_otel_logging(args.log_level, namespace=NAMESPACE, autoindexer_name=AUTOINDEXER_NAME)
     
     try:
         job = AutoIndexerJob(dry_run=args.dry_run)

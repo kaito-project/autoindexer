@@ -22,7 +22,6 @@ import os
 
 # OpenTelemetry imports
 from opentelemetry._logs import set_logger_provider
-from opentelemetry.exporter.otlp.proto.grpc._log_exporter import OTLPLogExporter
 from opentelemetry.instrumentation.logging import LoggingInstrumentor
 from opentelemetry.sdk._logs import LoggerProvider, LoggingHandler
 from opentelemetry.sdk._logs.export import BatchLogRecordProcessor, ConsoleLogExporter
@@ -30,12 +29,11 @@ from opentelemetry.sdk.resources import Resource
 from opentelemetry.semconv.attributes.service_attributes import SERVICE_NAME, SERVICE_VERSION
 
 
-def configure_otel_logging(log_level: str = "INFO", use_otlp_exporter: bool = False, namespace: str = None, autoindexer_name: str = None):
-    """Configure OpenTelemetry native logging.
+def configure_otel_logging(log_level: str = "INFO", namespace: str = None, autoindexer_name: str = None):
+    """Configure OpenTelemetry native logging for stdout output.
     
     Args:
         log_level: Logging level (DEBUG, INFO, WARNING, ERROR)
-        use_otlp_exporter: Whether to enable OTLP exporter for remote collection
         namespace: Kubernetes namespace name
         autoindexer_name: AutoIndexer instance name
         
@@ -67,29 +65,10 @@ def configure_otel_logging(log_level: str = "INFO", use_otlp_exporter: bool = Fa
     logger_provider = LoggerProvider(resource=resource)
     set_logger_provider(logger_provider)
     
-    # Configure exporters
-    exporters = []
-    
-    # Always add console exporter for local development/debugging
+    # Configure console exporter for stdout logging
     console_exporter = ConsoleLogExporter()
-    exporters.append(console_exporter)
-    
-    # Add OTLP exporter if configured
-    if use_otlp_exporter or os.getenv("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT"):
-        otlp_endpoint = os.getenv(
-            "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT",
-            os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4317")
-        )
-        otlp_exporter = OTLPLogExporter(
-            endpoint=otlp_endpoint,
-            headers=_get_otlp_headers(),
-        )
-        exporters.append(otlp_exporter)
-    
-    # Add batch processors for each exporter
-    for exporter in exporters:
-        processor = BatchLogRecordProcessor(exporter)
-        logger_provider.add_log_record_processor(processor)
+    processor = BatchLogRecordProcessor(console_exporter)
+    logger_provider.add_log_record_processor(processor)
     
     # Configure Python logging integration
     handler = LoggingHandler(
@@ -113,19 +92,4 @@ def configure_otel_logging(log_level: str = "INFO", use_otlp_exporter: bool = Fa
     return logger_provider
 
 
-def _get_otlp_headers() -> dict[str, str]:
-    """Get OTLP headers from environment variables.
-    
-    Returns:
-        dict: Headers for OTLP exporter authentication
-    """
-    headers = {}
-    
-    # Standard OTEL headers
-    if auth_header := os.getenv("OTEL_EXPORTER_OTLP_HEADERS"):
-        for header in auth_header.split(","):
-            if "=" in header:
-                key, value = header.strip().split("=", 1)
-                headers[key] = value
-    
-    return headers
+
