@@ -56,6 +56,9 @@ runs:
         if ! which az > /dev/null; then
           echo "Azure CLI not found. Installing..."
           curl -sL https://aka.ms/InstallAzureCLIDeb | sudo bash
+          
+          az extension add --name aks-preview --allow-preview true -y
+          az extension update --name aks-preview --allow-preview true -y
         else
           echo "Azure CLI already installed."
         fi
