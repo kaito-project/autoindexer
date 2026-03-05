@@ -1,7 +1,7 @@
 name: E2E - AutoIndexer
 
 on:
-  workflow_dispatch:
+  workflow_call:
     inputs:
       git_sha:
         description: "Git commit SHA"
@@ -19,19 +19,6 @@ on:
         description: "Whether to keep the resource group after tests complete (for debugging)"
         required: false
         default: "false"
-  pull_request_target:
-    types:
-      - opened
-      - synchronize
-      - reopened
-    branches:
-      - main
-    paths:
-      - 'test/**'
-      - 'pkg/**'
-      - 'cmd/**'
-      - '.github/**'
-      - 'jobs/**'
 
 env:
   GO_VERSION: "1.24"
@@ -43,6 +30,11 @@ permissions:
 jobs:
   e2e-tests:
     runs-on: [ "self-hosted", "kaito-project" ]
+    environment: e2e-tests
+    permissions:
+      contents: read
+      id-token: write
+
     steps:
       - name: Harden Runner
         uses: step-security/harden-runner@f4a75cfd619ee5ce8d5b864b0d183aff3c69b55a # v2.13.1
