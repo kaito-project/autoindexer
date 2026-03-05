@@ -86,7 +86,7 @@ runs:
         inlineScript: |
           az aks create  --name "${{ env.CLUSTER_NAME }}" --resource-group "${{ env.CLUSTER_NAME }}" \
           --location "${{ env.REGION }}" --attach-acr "${{ env.CLUSTER_NAME }}" \
-          --kubernetes-version "${{ env.K8S_VERSION }}" --generate-ssh-keys --node-provisioning-mode Auto \
+          --kubernetes-version "${{ env.K8S_VERSION }}" --generate-ssh-keys \
           --enable-managed-identity --enable-workload-identity --enable-oidc-issuer --node-vm-size Standard_D2d_v4 -o none
 
     - name: Create node pool for RAG workloads
