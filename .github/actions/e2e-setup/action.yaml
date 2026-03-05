@@ -60,12 +60,10 @@ runs:
           echo "Azure CLI already installed."
         fi
 
-    - name: Azure login
-      uses: azure/login@v2
-      with:
-        client-id: ${{ env.AZURE_CLIENT_ID }}
-        tenant-id: ${{ env.AZURE_TENANT_ID }}
-        subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
+    - name: Azure CLI Login
+      shell: bash
+      run: |
+        az login --identity
 
     - name: Install Helm
       uses: azure/setup-helm@v4
