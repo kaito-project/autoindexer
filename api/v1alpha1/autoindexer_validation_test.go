@@ -246,10 +246,16 @@ func TestGitDataSourceSpec_ValidatePatterns(t *testing.T) {
 			description: "Single star should be valid",
 		},
 		{
+			name:        "valid prefix globstar extension patterns",
+			paths:       []string{"pkg/**/*.go", "src/**/*.py", "docs/**/*.md", "api/v1/**/*.json"},
+			wantErr:     false,
+			description: "Prefix directory with globstar and extension patterns should be valid",
+		},
+		{
 			name: "valid mixed patterns",
 			paths: []string{
 				"src", "*.go", "foo/bar", "foo/**", "**/main.py",
-				"docs/*.md", "api/**/handler", "test/**",
+				"docs/*.md", "api/**/handler", "test/**", "pkg/**/*.go",
 			},
 			wantErr:     false,
 			description: "Mix of all valid pattern types should work",

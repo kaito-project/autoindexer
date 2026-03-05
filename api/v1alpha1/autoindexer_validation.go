@@ -131,12 +131,13 @@ func (g *GitDataSourceSpec) validate() *apis.FieldError {
 	// 3. foo/**, foo/bar/**
 	// 4. a/**/b
 	var (
-		patSimple           = regexp.MustCompile(`^([a-zA-Z0-9._-]+)(/[a-zA-Z0-9._-]+)*$`)
-		patStar             = regexp.MustCompile(`^(\*|\*\*/[a-zA-Z0-9._-]+|[a-zA-Z0-9._-]+/\*|[a-zA-Z0-9._-]+/\*\.[a-zA-Z0-9]+|\*\.[a-zA-Z0-9]+)$`)
-		patGlobstar         = regexp.MustCompile(`^(\*\*/[a-zA-Z0-9._-]+(/[a-zA-Z0-9._-]+)*)$`)
-		patGlobstarExt      = regexp.MustCompile(`^\*\*/\*\.[a-zA-Z0-9]+$`)
-		patTrailingGlobstar = regexp.MustCompile(`^([a-zA-Z0-9._-]+(/[a-zA-Z0-9._-]+)*)/\*\*$`)
-		patMiddleGlobstar   = regexp.MustCompile(`^([a-zA-Z0-9._-]+/)?\*\*/[a-zA-Z0-9._-]+(/[a-zA-Z0-9._-]+)*$`)
+		patSimple            = regexp.MustCompile(`^([a-zA-Z0-9._-]+)(/[a-zA-Z0-9._-]+)*$`)
+		patStar              = regexp.MustCompile(`^(\*|\*\*/[a-zA-Z0-9._-]+|[a-zA-Z0-9._-]+/\*|[a-zA-Z0-9._-]+/\*\.[a-zA-Z0-9]+|\*\.[a-zA-Z0-9]+)$`)
+		patGlobstar          = regexp.MustCompile(`^(\*\*/[a-zA-Z0-9._-]+(/[a-zA-Z0-9._-]+)*)$`)
+		patGlobstarExt       = regexp.MustCompile(`^\*\*/\*\.[a-zA-Z0-9]+$`)
+		patTrailingGlobstar  = regexp.MustCompile(`^([a-zA-Z0-9._-]+(/[a-zA-Z0-9._-]+)*)/\*\*$`)
+		patMiddleGlobstar    = regexp.MustCompile(`^([a-zA-Z0-9._-]+/)?\*\*/[a-zA-Z0-9._-]+(/[a-zA-Z0-9._-]+)*$`)
+		patPrefixGlobstarExt = regexp.MustCompile(`^([a-zA-Z0-9._-]+(/[a-zA-Z0-9._-]+)*)/\*\*/\*\.[a-zA-Z0-9]+$`)
 	)
 	isValidGitignorePattern := func(p string) bool {
 		if p == "" {
@@ -158,6 +159,9 @@ func (g *GitDataSourceSpec) validate() *apis.FieldError {
 			return true
 		}
 		if patMiddleGlobstar.MatchString(p) {
+			return true
+		}
+		if patPrefixGlobstarExt.MatchString(p) {
 			return true
 		}
 		return false

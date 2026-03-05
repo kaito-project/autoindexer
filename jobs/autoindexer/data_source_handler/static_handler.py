@@ -232,8 +232,9 @@ class StaticDataSourceHandler(DataSourceHandler):
                 
                 logger.info(f"Fetched {total_size} bytes from {url}, content type: {content_type}")
                 # Use content handler factory to extract text
-                return self.content_handler_factory.extract_text(raw_content, content_type)
-                
+                file_extension = os.path.splitext(parsed_url.path)[1].lower()
+                return self.content_handler_factory.extract_text(raw_content, content_type, file_extension)
+
         except requests.RequestException as e:
             logger.error(f"HTTP error fetching {url}: {e}")
             raise DataSourceError(f"HTTP error fetching {url}: {e}")

@@ -60,14 +60,15 @@ class ContentHandlerFactory:
         self._handlers.sort(key=lambda h: h.get_priority(), reverse=True)
         logger.info(f"Initialized {len(self._handlers)} content handlers")
     
-    def get_handler(self, raw_content: bytes, content_type: str) -> BaseContentHandler:
+    def get_handler(self, raw_content: bytes, content_type: str, file_extension: str) -> BaseContentHandler:
         """
         Get the most appropriate content handler for the given content.
         
         Args:
             raw_content: Raw bytes content
             content_type: HTTP content type header
-            
+            file_extension: File extension (e.g., .pdf, .txt)
+
         Returns:
             BaseContentHandler: The best handler for this content
             
@@ -76,7 +77,7 @@ class ContentHandlerFactory:
         """
         for handler in self._handlers:
             try:
-                if handler.can_handle(raw_content, content_type):
+                if handler.can_handle(raw_content, content_type, file_extension):
                     logger.debug(f"Selected handler: {handler.__class__.__name__}")
                     return handler
             except Exception as e:
@@ -86,22 +87,23 @@ class ContentHandlerFactory:
         # This should not happen since TextContentHandler is a fallback
         raise ContentHandlingError("No suitable content handler found")
     
-    def extract_text(self, raw_content: bytes, content_type: str) -> str:
+    def extract_text(self, raw_content: bytes, content_type: str, file_extension: str) -> str:
         """
         Extract text content using the appropriate handler.
         
         Args:
             raw_content: Raw bytes content
             content_type: HTTP content type header
-            
+            file_extension: File extension (e.g., .pdf, .txt)
+
         Returns:
             str: Extracted text content
             
         Raises:
             ContentHandlingError: If extraction fails
         """
-        handler = self.get_handler(raw_content, content_type)
-        return handler.extract_text(raw_content, content_type)
+        handler = self.get_handler(raw_content, content_type, file_extension)
+        return handler.extract_text(raw_content, content_type, file_extension)
     
     def get_available_handlers(self) -> list[str]:
         """

@@ -195,15 +195,17 @@ class GitDataSourceHandler(DataSourceHandler):
             files = self._get_repository_files()
             documents = []
             
+            indexed_files_count = 0
             for file_path in files:
                 try:
                     content = self._read_file_content(file_path)
                     if content:
                         doc = self._create_document(file_path, content, "full")
                         documents.append(doc)
-                        
+                        indexed_files_count += 1
                         # Batch index documents
                         if len(documents) >= 10:
+                            logger.info(f"Indexing batch of {len(documents)} documents ({indexed_files_count}/{len(files)} files processed)")
                             self._index_documents_batch(documents)
                             documents = []
                 except Exception as e:
@@ -212,6 +214,7 @@ class GitDataSourceHandler(DataSourceHandler):
             
             # Index remaining documents
             if documents:
+                logger.info(f"Indexing final batch of {len(documents)} documents ({indexed_files_count}/{len(files)} files processed)")
                 self._index_documents_batch(documents)
                 
         except Exception as e:
@@ -235,9 +238,10 @@ class GitDataSourceHandler(DataSourceHandler):
             update_docs = []
             delete_doc_ids = []
             
+            indexed_documents_count = 0
             for diff_item in diff_index:
                 file_path = diff_item.b_path or diff_item.a_path
-                
+                indexed_documents_count += 1
                 if not self._should_index_file(file_path):
                     continue
                 
@@ -284,24 +288,28 @@ class GitDataSourceHandler(DataSourceHandler):
                             logger.warning(f"Failed to fetch file from rag {diff_item.a_path} for renaming, indexing as new document")
                 
                 if len(create_docs) >= 10:
+                    logger.info(f"Indexing batch of {len(create_docs)} created documents ({indexed_documents_count}/{len(diff_index)} diff items processed)")
                     self._index_documents_batch(create_docs)
                     create_docs = []
                 if len(update_docs) >= 10:
+                    logger.info(f"Updating batch of {len(update_docs)} modified documents ({indexed_documents_count}/{len(diff_index)} diff items processed)")
                     self._update_documents_batch(update_docs)
                     update_docs = []
                 if len(delete_doc_ids) >= 10:
+                    logger.info(f"Deleting batch of {len(delete_doc_ids)} removed documents ({indexed_documents_count}/{len(diff_index)} diff items processed)")
                     self._delete_documents_batch(delete_doc_ids)
                     delete_doc_ids = []
             
             # Process all changes
             if create_docs:
+                logger.info(f"Indexing final batch of {len(create_docs)} created documents ({indexed_documents_count}/{len(diff_index)} diff items processed)")
                 self._index_documents_batch(create_docs)
             if update_docs:
+                logger.info(f"Updating final batch of {len(update_docs)} modified documents ({indexed_documents_count}/{len(diff_index)} diff items processed)")
                 self._update_documents_batch(update_docs)
             if delete_doc_ids:
+                logger.info(f"Deleting final batch of {len(delete_doc_ids)} removed documents ({indexed_documents_count}/{len(diff_index)} diff items processed)")
                 self._delete_documents_batch(delete_doc_ids)
-                
-            logger.info(f"Processed diff: {len(create_docs)} created, {len(update_docs)} updated, {len(delete_doc_ids)} deleted")
             
         except Exception as e:
             raise DataSourceError(f"Failed to index diff files: {e}")
@@ -362,7 +370,8 @@ class GitDataSourceHandler(DataSourceHandler):
             
             # Use content handler factory to extract text
             content_type = self._get_content_type(file_path)
-            return self.content_handler_factory.extract_text(raw_content, content_type)
+            file_extension = os.path.splitext(file_path)[1].lower()
+            return self.content_handler_factory.extract_text(raw_content, content_type, file_extension)
             
         except Exception as e:
             logger.warning(f"Failed to read file {file_path}: {e}")
@@ -434,6 +443,8 @@ class GitDataSourceHandler(DataSourceHandler):
         except Exception as e:
             error_msg = f"Failed to index document batch: {e}"
             logger.error(error_msg)
+            for doc in documents:
+                logger.error(f"Failed document metadata: {doc.metadata}")
             self.errors.append(error_msg)
     
     def _update_documents_batch(self, documents: list[Document]):
