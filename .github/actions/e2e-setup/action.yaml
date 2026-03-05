@@ -63,6 +63,12 @@ runs:
           echo "Azure CLI already installed."
         fi
 
+    - name: Intall az cli aks-preview
+      shell: bash
+      run: |
+          az extension add --name aks-preview --allow-preview true -y
+          az extension update --name aks-preview --allow-preview true -y
+
     - name: Azure CLI Login
       shell: bash
       run: |
