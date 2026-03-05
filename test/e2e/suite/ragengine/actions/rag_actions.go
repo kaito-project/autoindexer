@@ -31,7 +31,7 @@ func CreateRAGEngine(ragEngineName, ragEngineNamespace string) types.Action {
 		RunFunc: func(ctx context.Context, logger *slog.Logger, testContext *types.TestContext) error {
 			logger.Info("Creating RAG Engine")
 			ragManifext := manifests.CreateRAGEngineManifest(ragEngineName, ragEngineNamespace,
-				manifests.DefaultCPUInstanceType, manifests.DefaultTestEmbeddingModelID,
+				manifests.DefaultGPUInstanceType, manifests.DefaultTestEmbeddingModelID,
 				manifests.CreateRAGEngineInferenceServiceSpec(manifests.DefaultTestURL, manifests.DefaultTestContextWindowSize),
 			)
 
