@@ -4,18 +4,22 @@ on:
   workflow_call:
     inputs:
       git_sha:
+        type: string
         description: "Git commit SHA"
         required: true
         default: "main"
       region:
+        type: string
         description: "the azure location to run the e2e test in"
         required: false
         default: "eastus"
       k8s_version:
+        type: string
         description: "the kubernetes version for the aks cluster"
         required: false
         default: "1.32.0"
       keep_resource_group:
+        type: string
         description: "Whether to keep the resource group after tests complete (for debugging)"
         required: false
         default: "false"
