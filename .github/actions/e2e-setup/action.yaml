@@ -58,7 +58,7 @@ runs:
           curl -sL https://aka.ms/InstallAzureCLIDeb | sudo bash
           
           az extension add --name aks-preview --allow-preview true -y
-          az extension update --name aks-preview --allow-preview true -y
+          az extension update --name aks-preview --allow-preview true
         else
           echo "Azure CLI already installed."
         fi
