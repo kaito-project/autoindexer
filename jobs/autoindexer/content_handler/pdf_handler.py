@@ -41,17 +41,22 @@ class PDFContentHandler(BaseContentHandler):
         """
         super().__init__(config)
         
-    def can_handle(self, raw_content: bytes, content_type: str) -> bool:
+    def can_handle(self, raw_content: bytes, content_type: str, file_extension: str) -> bool:
         """
         Determine if this handler can process PDF content.
         
         Args:
             raw_content: Raw bytes content
             content_type: HTTP content type header
-            
+            file_extension: File extension (e.g., .pdf, .txt)
         Returns:
             bool: True if the content appears to be a PDF file
         """
+
+        # Check file extension
+        if file_extension and file_extension.lower() != '.pdf':
+            return False
+
         # Check content type
         if 'application/pdf' in content_type.lower():
             return True
@@ -70,14 +75,14 @@ class PDFContentHandler(BaseContentHandler):
             logger.warning(f"Failed to read PDF content: {e}")
         return False
 
-    def extract_text(self, raw_content: bytes, content_type: str) -> str:
+    def extract_text(self, raw_content: bytes, content_type: str, file_extension: str) -> str:
         """
         Extract text content from PDF bytes.
         
         Args:
             raw_content: Raw PDF bytes
             content_type: HTTP content type header
-            
+            file_extension: File extension (e.g., .pdf, .txt)
         Returns:
             str: Extracted text content from the PDF
             

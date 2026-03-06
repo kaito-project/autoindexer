@@ -27,7 +27,8 @@ class KAITORAGClient:
     """
 
     def __init__(self, base_url):
-        self.client = Client(base_url)
+        # Initialize the RAG client with the base URL of the RAGEngine API
+        self.client = Client(base_url, raise_on_unexpected_status=True)
 
     def index_documents(self, index_name: str, documents: list[Document]):
         """

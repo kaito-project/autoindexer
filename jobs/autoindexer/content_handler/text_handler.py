@@ -43,7 +43,7 @@ class TextContentHandler(BaseContentHandler):
         """
         super().__init__(config)
         
-    def can_handle(self, raw_content: bytes, content_type: str) -> bool:
+    def can_handle(self, raw_content: bytes, content_type: str, file_extension: str) -> bool:
         """
         Determine if this handler can process text-based content.
         
@@ -53,7 +53,7 @@ class TextContentHandler(BaseContentHandler):
         Args:
             raw_content: Raw bytes content
             content_type: HTTP content type header
-            
+            file_extension: File extension (e.g., .pdf, .txt)
         Returns:
             bool: True if the content appears to be text-based
         """
@@ -94,13 +94,14 @@ class TextContentHandler(BaseContentHandler):
         # Default to True as this is the fallback handler
         return False
     
-    def extract_text(self, raw_content: bytes, content_type: str) -> str:
+    def extract_text(self, raw_content: bytes, content_type: str, file_extension: str) -> str:
         """
         Extract text content from raw bytes, handling various encodings.
         
         Args:
             raw_content: Raw bytes content
             content_type: HTTP content type header
+            file_extension: File extension (e.g., .pdf, .txt)
             
         Returns:
             str: Decoded text content

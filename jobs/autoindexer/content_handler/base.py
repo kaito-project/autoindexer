@@ -38,13 +38,14 @@ class BaseContentHandler(ABC):
         self.config = config or {}
     
     @abstractmethod
-    def can_handle(self, raw_content: bytes, content_type: str) -> bool:
+    def can_handle(self, raw_content: bytes, content_type: str, file_extension: str) -> bool:
         """
         Determine if this handler can process the given content.
         
         Args:
             raw_content: Raw bytes content
             content_type: HTTP content type header
+            file_extension: File extension (e.g., .pdf, .txt)
             
         Returns:
             bool: True if this handler can process the content
@@ -52,13 +53,14 @@ class BaseContentHandler(ABC):
         pass
     
     @abstractmethod
-    def extract_text(self, raw_content: bytes, content_type: str) -> str:
+    def extract_text(self, raw_content: bytes, content_type: str, file_extension: str) -> str:
         """
         Extract text content from the raw bytes.
         
         Args:
             raw_content: Raw bytes content
             content_type: HTTP content type header
+            file_extension: File extension (e.g., .pdf, .txt)
             
         Returns:
             str: Extracted text content

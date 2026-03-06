@@ -534,6 +534,11 @@ func GenerateRoleManifest(autoIndexer *v1alpha1.AutoIndexer) *rbacv1.Role {
 				Verbs:         []string{"get", "list", "watch", "update", "patch"},
 				ResourceNames: []string{autoIndexer.Name},
 			},
+			{
+				APIGroups: []string{""},
+				Resources: []string{"events"},
+				Verbs:     []string{"create"},
+			},
 		},
 	}
 }

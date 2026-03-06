@@ -315,8 +315,8 @@ class TestStaticDataSourceHandler:
         
         handler = PDFContentHandler()
         
-        assert handler.can_handle(b'', 'application/pdf') is True
-        assert handler.can_handle(b'', 'text/plain') is False
+        assert handler.can_handle(b'', 'application/pdf', ".pdf") is True
+        assert handler.can_handle(b'', 'text/plain', ".txt") is False
 
     def test_is_pdf_content_url_extension(self, valid_config, mock_rag_client, mock_autoindexer_client):
         """Test PDF detection no longer uses URL extension (content-based detection only)."""
@@ -325,8 +325,8 @@ class TestStaticDataSourceHandler:
         handler = PDFContentHandler()
         
         # Without content type or magic bytes, extension doesn't matter anymore
-        assert handler.can_handle(b'', '') is False
-        assert handler.can_handle(b'', '') is False
+        assert handler.can_handle(b'', '', '') is False
+        assert handler.can_handle(b'', '', '') is False
 
     def test_is_pdf_content_magic_bytes(self, valid_config, mock_rag_client, mock_autoindexer_client):
         """Test PDF detection based on magic bytes."""
@@ -337,8 +337,8 @@ class TestStaticDataSourceHandler:
         pdf_content = b'%PDF-1.4\n...'
         text_content = b'This is plain text'
         
-        assert handler.can_handle(pdf_content, '') is True
-        assert handler.can_handle(text_content, '') is False
+        assert handler.can_handle(pdf_content, '', "") is True
+        assert handler.can_handle(text_content, '', "") is False
 
     def test_extract_pdf_text_pdfplumber_success(self, valid_config, mock_rag_client, mock_autoindexer_client):
         """Test successful PDF text extraction using pdfplumber."""
@@ -358,7 +358,7 @@ class TestStaticDataSourceHandler:
             mock_pdfplumber.open.return_value = mock_pdf
             
             handler = PDFContentHandler()
-            result = handler.extract_text(b'%PDF-1.4...', 'application/pdf')
+            result = handler.extract_text(b'%PDF-1.4...', 'application/pdf', ".pdf")
             
             assert "Page content" in result
             assert "--- Page 1 ---" in result
@@ -383,7 +383,7 @@ class TestStaticDataSourceHandler:
             mock_pdfplumber.open.return_value = mock_pdf
             
             handler = PDFContentHandler()
-            result = handler.extract_text(b'%PDF-1.4...', 'application/pdf')
+            result = handler.extract_text(b'%PDF-1.4...', 'application/pdf', ".pdf")
             
             assert "Page content from pdfplumber" in result
             assert "--- Page 1 ---" in result
@@ -401,7 +401,7 @@ class TestStaticDataSourceHandler:
             handler = PDFContentHandler()
             
             with pytest.raises(ContentHandlingError):
-                handler.extract_text(b'%PDF-1.4...', 'application/pdf')
+                handler.extract_text(b'%PDF-1.4...', 'application/pdf', ".pdf")
 
     def test_table_to_text_success(self, valid_config, mock_rag_client, mock_autoindexer_client):
         """Test successful table conversion to text using PDF handler."""
@@ -451,7 +451,7 @@ class TestStaticDataSourceHandler:
             handler = TextContentHandler()
             content = "Content with special chars: àéî".encode('iso-8859-1')
             
-            result = handler.extract_text(content, 'text/plain')
+            result = handler.extract_text(content, 'text/plain', "")
             
             assert result == "Content with special chars: àéî"
             mock_detect.assert_called_once()
@@ -466,7 +466,8 @@ class TestStaticDataSourceHandler:
         
         result = handler.extract_text(
             encoded_content, 
-            'text/plain; charset=latin1'
+            'text/plain; charset=latin1',
+            ""
         )
         
         assert result == content
@@ -477,7 +478,7 @@ class TestStaticDataSourceHandler:
         
         handler = TextContentHandler()
         
-        result = handler.extract_text(b'', 'text/plain')
+        result = handler.extract_text(b'', 'text/plain', "")
         
         assert result == ""
 
@@ -489,7 +490,7 @@ class TestStaticDataSourceHandler:
         # Use bytes that can't be decoded properly
         invalid_content = b'\xff\xfe\x00\x00invalid'
         
-        result = handler.extract_text(invalid_content, 'text/plain')
+        result = handler.extract_text(invalid_content, 'text/plain', "")
         
         # Should use UTF-8 with error replacement
         assert isinstance(result, str)
