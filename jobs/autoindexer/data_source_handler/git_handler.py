@@ -256,7 +256,15 @@ class GitDataSourceHandler(DataSourceHandler):
                     content = self._read_file_content(file_path)
                     if not content:
                         continue
-                    list_resp = self.rag_client.list_documents(index_name=self.index_name, metadata_filter={"file_path": file_path}, limit=1)
+                    
+                    try:
+                        list_resp = self.rag_client.list_documents(index_name=self.index_name, metadata_filter={"file_path": file_path}, limit=1)
+                    except Exception as e:
+                        error_msg = f"Failed to fetch file from rag {file_path} for update: {e}"
+                        logger.warning(error_msg)
+                        self.errors.append(error_msg)
+                        list_resp = None
+
                     if list_resp and list_resp.documents:
                         doc = self._create_document(file_path, content, "modified")
                         doc.doc_id = list_resp.documents[0].doc_id
@@ -267,9 +275,16 @@ class GitDataSourceHandler(DataSourceHandler):
                         create_docs.append(doc)
                         
                 elif diff_item.change_type == 'D':  # Deleted
-                    list_resp = self.rag_client.list_documents(index_name=self.index_name, metadata_filter={"file_path": file_path}, limit=1)
+                    try:
+                        list_resp = self.rag_client.list_documents(index_name=self.index_name, metadata_filter={"file_path": file_path}, limit=1)
+                    except Exception as e:
+                        error_msg = f"Failed to fetch file from rag {file_path} for deletion: {e}"
+                        logger.warning(error_msg)
+                        self.errors.append(error_msg)
+                        list_resp = None
+
                     if not list_resp or not list_resp.documents:
-                        logger.warning(f"Failed to fetch file from rag {file_path} for deletion")
+                        logger.warning(f"Failed to fetch file from rag {file_path} for deletion, continuing without deletion")
                         continue
                     delete_doc_ids.append(list_resp.documents[0].doc_id)
                     
@@ -279,13 +294,22 @@ class GitDataSourceHandler(DataSourceHandler):
                     if not content:
                         continue
                     if diff_item.a_path:
-                        list_resp = self.rag_client.list_documents(index_name=self.index_name, metadata_filter={"file_path": diff_item.a_path}, limit=1)
+                        try:
+                            list_resp = self.rag_client.list_documents(index_name=self.index_name, metadata_filter={"file_path": diff_item.a_path}, limit=1)
+                        except Exception as e:
+                            error_msg = f"Failed to fetch file from rag {diff_item.a_path} for renaming: {e}"
+                            logger.warning(error_msg)
+                            self.errors.append(error_msg)
+                            list_resp = None
+
                         if list_resp and list_resp.documents:
                             doc = self._create_document(file_path, content, "renamed")
                             doc.doc_id = list_resp.documents[0].doc_id
                             update_docs.append(doc)
                         else:
                             logger.warning(f"Failed to fetch file from rag {diff_item.a_path} for renaming, indexing as new document")
+                            doc = self._create_document(file_path, content, "added")
+                            create_docs.append(doc)
                 
                 if len(create_docs) >= 10:
                     logger.info(f"Indexing batch of {len(create_docs)} created documents ({indexed_documents_count}/{len(diff_index)} diff items processed)")
