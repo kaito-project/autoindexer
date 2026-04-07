@@ -62,6 +62,7 @@ class KustoDataSourceHandler(DataSourceHandler):
         self.language = self.config.get("language")
         self.initial_query = self.config.get("initialQuery")
         self.incremental_query = self.config.get("incrementalQuery")
+        self.conditions = self.config.get("conditions", [])
         
         self.errors = []
         self.total_time = None
@@ -98,8 +99,15 @@ class KustoDataSourceHandler(DataSourceHandler):
         For incremental queries, replaces $LAST_INDEXING_TIMESTAMP with the actual timestamp.
         """
         last_timestamp = self._get_last_checkpoint_time()
+
+        last_indexing_had_errors = any(
+            condition.get("type") == "AutoIndexerError" and condition.get("status") == "True"
+            for condition in self.conditions
+        )
+        if last_indexing_had_errors:
+            logger.warning("Previous indexing had errors, using initial query to recover")
         
-        if last_timestamp is None:
+        if last_timestamp is None or last_indexing_had_errors:
             # First run: use initial query
             logger.info("🆕 FIRST RUN: Using initialQuery")
             query = self.initial_query

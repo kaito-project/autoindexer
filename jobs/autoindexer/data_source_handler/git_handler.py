@@ -75,6 +75,7 @@ class GitDataSourceHandler(DataSourceHandler):
         self.exclude_matcher = None
         self.include_matcher = None
         self.last_indexed_commit = self.config.get("lastIndexedCommit", "")
+        self.conditions = self.config.get("conditions", [])
         
         factory = get_factory(MatcherImplementation.PURE_PYTHON)
         if self.exclude_paths:
@@ -112,13 +113,22 @@ class GitDataSourceHandler(DataSourceHandler):
             
             # Clone or fetch repository
             self._setup_repository()
+
+            # Check for previous error conditions in AutoIndexer status
+            last_indexing_had_errors = any(
+                condition.get("type") == "AutoIndexerError" and condition.get("status") == "True"
+                for condition in self.conditions
+            )
+
+            if last_indexing_had_errors:
+                logger.warning("Previous indexing had errors, performing full indexing to recover")
             
             # Determine indexing strategy based on configuration
             if self.commit:
                 # Specific commit requested - index all files at that commit
                 logger.info(f"Indexing specific commit: {self.commit}")
                 self._index_all_files()
-            elif self.last_indexed_commit:
+            elif self.last_indexed_commit and not last_indexing_had_errors:
                 # Incremental indexing - process diff since last indexed commit
                 logger.info(f"Incremental indexing since commit: {self.last_indexed_commit}")
                 self._index_diff_files()

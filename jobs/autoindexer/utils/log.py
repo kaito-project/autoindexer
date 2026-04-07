@@ -28,6 +28,9 @@ from opentelemetry.sdk._logs.export import BatchLogRecordProcessor, ConsoleLogEx
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.semconv.attributes.service_attributes import SERVICE_NAME, SERVICE_VERSION
 
+# Global flag to track if instrumentation has been initialized
+_instrumentation_initialized = False
+
 
 def configure_otel_logging(log_level: str = "INFO", namespace: str = None, autoindexer_name: str = None):
     """Configure OpenTelemetry native logging for stdout output.
@@ -86,8 +89,11 @@ def configure_otel_logging(log_level: str = "INFO", namespace: str = None, autoi
     root_logger.addHandler(handler)
     root_logger.setLevel(getattr(logging, log_level.upper(), logging.INFO))
     
-    # Enable automatic instrumentation for standard logging
-    LoggingInstrumentor().instrument(set_logging_format=True)
+    # Enable automatic instrumentation for standard logging (only once)
+    global _instrumentation_initialized
+    if not _instrumentation_initialized:
+        LoggingInstrumentor().instrument(set_logging_format=True)
+        _instrumentation_initialized = True
     
     return logger_provider
 
