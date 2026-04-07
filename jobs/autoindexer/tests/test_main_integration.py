@@ -124,7 +124,8 @@ class TestAutoIndexerJob:
                 # Verify static handler was created with expected config
                 expected_config = {
                     "autoindexer_name": "test-namespace_test-autoindexer",
-                    "urls": ["https://example.com/doc.txt"]
+                    "urls": ["https://example.com/doc.txt"],
+                    "conditions": []
                 }
                 mock_static_handler.assert_called_once_with(
                     index_name="test-index",

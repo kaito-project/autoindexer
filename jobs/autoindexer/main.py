@@ -231,6 +231,7 @@ class AutoIndexerJob:
                         "paths": git_config.get("paths", []),
                         "excludePaths": git_config.get("excludePaths", []),
                         "lastIndexedCommit": crd_config.get("status", {}).get("lastIndexedCommit", ""),
+                        "conditions": crd_config.get("status", {}).get("conditions", [])
                     })
                     logger.info("Updated Git data source configuration from CRD")
                 
@@ -238,7 +239,8 @@ class AutoIndexerJob:
                     static_config = ds_config["static"]
                     self.datasource_config.update({
                         "autoindexer_name": autoindexer_full_name,
-                        "urls": static_config.get("urls", [])
+                        "urls": static_config.get("urls", []),
+                        "conditions": crd_config.get("status", {}).get("conditions", [])
                     })
                     logger.info("Updated Static data source configuration from CRD")
                 
@@ -249,6 +251,7 @@ class AutoIndexerJob:
                         "language": database_config.get("language"),
                         "initialQuery": database_config.get("initialQuery"),
                         "incrementalQuery": database_config.get("incrementalQuery"),
+                        "conditions": crd_config.get("status", {}).get("conditions", [])
                     })
                     logger.info(f"Updated Database data source configuration from CRD (language: {database_config.get('language')})")
                 
